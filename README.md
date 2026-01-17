@@ -32,15 +32,12 @@ pip install numpy pandas matplotlib seaborn pynbody
 
 ### Install Darktrace
 
+Since this package is not available on PyPI, install it directly from the repository:
+
 1. Clone the repository:
 ```bash
 git clone https://github.com/nsushantnigudkar/darktrace.git
 cd darktrace
-```
-
-2. Install the package:
-```bash
-pip install -e .
 ```
 
 ## Configuration
