@@ -1,0 +1,25 @@
+{ 
+    "paths":{
+      
+      "tangos_path":"/scratch/dp324/shared/dp101/EDGE/tangos/",
+      "pynbody_path":"/scratch/dp324/shared/dp101/EDGE/",
+      "manual_halonum_path":"",
+      "manual_mstar_path":""
+              
+    }, 
+
+    "tagging":{
+        
+      "method":"angular_momentum",
+      "ftag":0.01 
+      
+    },
+
+    "darklight":{
+
+      "n":500, 
+      "DMO_OR_HYDRO":"DMO",
+      "poccupied":"all"
+    } 
+
+}
