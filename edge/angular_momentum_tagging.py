@@ -133,12 +133,12 @@ def angmom_tag_particles_edge(sim_name,halo_number=1,mergers = True, machine='di
         
     DMOname = sim_name 
 
-
+    '''
     # get particle data at z=0 for DMO sims, if available
     if DMOname==None:
         print('--> DMO simulation with name '+DMOname+' does not exist, skipping!')
         continue
-        
+    ''' 
     # load in the DMO sim to get particle data and get accurate halonums for the main halo in each snapshot
     # load_tangos_data is a part of the 'utils.py' file in the tagging dir, it loads in the tangos database 'DMOsim' and returns the main halos tangos object, outputs and halonums at all timesteps
     # here haloidx_at_end or 0 here specifies the index associated with the main halo at the last snapshot in the tangos db's halo catalogue
@@ -212,7 +212,7 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
         DMOname = simname
     
     
-    tangos.init_db(join(config.get_path("tangos_path"),str(split[0]+".db"))
+    tangos.init_db(join(config.get_path("tangos_path"),str(split[0]+".db")))
     
     DMOsim = tangos.get_simulation(DMOname)
         

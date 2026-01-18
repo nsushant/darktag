@@ -154,7 +154,7 @@ def BE_tag_particles_edge(sim_name,occupation_fraction,fmb_percentage,PE_file = 
         DMOname = simname 
 
         
-if machine == 'dirac':
+        if machine == 'dirac':
             tangos_path = config.get_path("tangos_path")
             
             if physics == 'edge1':
@@ -281,7 +281,7 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,AHF_centers_fi
             tangos_path = config.get_path("tangos_path")
             pynbody_path = config.get_path("pynbody_path")
 
-if machine == 'dirac':
+        if machine == 'dirac':
             tangos_path = config.get_path("tangos_path")
             pynbody_path = config.get_path("pynbody_path")
             
@@ -354,8 +354,8 @@ if machine == 'dirac':
             
             if selected_iords_tot.shape[0]==0:
                 continue
-            
 
+            
             mstars_at_current_time = data_grouped['mstar'].values
             
             half_mass = float(mstars_at_current_time.sum())/2

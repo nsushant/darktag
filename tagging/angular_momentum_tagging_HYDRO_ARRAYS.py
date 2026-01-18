@@ -235,7 +235,7 @@ tangos.core.init_db(join(config.get_path("tangos_path"),str(haloname)+".db"))
 
     #mstar_total = mstar_s_insitu                                                                                                                                  
 
-mstar_s_insitu,t = integrate_sfr(hydrohalo["SFR_histogram"],ttangos[-1])
+    mstar_s_insitu,t = integrate_sfr(hydrohalo["SFR_histogram"],ttangos[-1])
     
     print("mstar produced by integration", len(mstar_s_insitu))
     
