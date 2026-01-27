@@ -26,7 +26,7 @@ import random
 import pynbody
 from .utils import *
 import random
-from ..config import config
+from ...config import config
 
 
 

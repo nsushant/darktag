@@ -1,6 +1,6 @@
 from .spatial_tagging import *
 from .angular_momentum_tagging import *
-from ..config import config
+from ...config import config
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
 

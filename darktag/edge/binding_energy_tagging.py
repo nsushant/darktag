@@ -25,10 +25,10 @@ from tangos.examples.mergers import *
 import random
 import sys
 import pandas as pd
-import darktrace.tagging.binding_energy_tagging as dtrace
-from darktrace.tagging.utils import *
-from darktrace.analysis.calculate import * 
-from ..config import config
+import darktag.tagging.binding_energy_tagging as dtag
+from darktag.tagging.utils import *
+from darktag.analysis.calculate import *
+from ...config import config
 
 
 def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):
@@ -205,7 +205,7 @@ def BE_tag_particles_edge(sim_name,occupation_fraction,fmb_percentage,PE_file = 
             print('output array length does not match redshift and time arrays')
 
 
-        df_tagged_particles,l_sel = dtrace.BE_tag_over_full_sim_recursive(DMOsim,-1, 1, free_param_value = fmb_percentage,PE_file=PE_file,pynbody_path  = pynbody_path, occupation_frac = 'edge1')
+        df_tagged_particles,l_sel = dtag.BE_tag_over_full_sim_recursive(DMOsim,-1, 1, free_param_value = fmb_percentage,PE_file=PE_file,pynbody_path  = pynbody_path, occupation_frac = 'edge1')
         
         #df_tagged_particles = dtrace.BE_tag_over_full_sim(DMOsim, free_param_value = 0.01, PE_file=PE_file,pynbody_path  = pynbody_path, occupation_frac = 'all')
         return df_tagged_particles

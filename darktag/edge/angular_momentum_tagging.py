@@ -25,12 +25,12 @@ from tangos.examples.mergers import *
 import random
 import sys
 import pandas as pd
-import darktrace.tagging.angular_momentum_tagging as dtrace
-from darktrace.tagging.utils import *
-from darktrace.analysis.calculate import * 
+import darktag.tagging.angular_momentum_tagging as dtag
+from darktag.tagging.utils import *
+from darktag.analysis.calculate import *
 from sklearn.cluster import DBSCAN
 from collections import Counter
-from ..config import config
+from ...config import config
 
 def get_child_iords(halo,dmo_particles,DMO_state='fiducial'):
 
@@ -159,10 +159,10 @@ def angmom_tag_particles_edge(sim_name,halo_number=1,mergers = True, machine='di
         hnumpath = config.get_path("manual_halonum_path")
 
     if recursive==True:
-        df_tagged_particles,l_sel = dtrace.angmom_tag_over_full_sim_recursive(DMOsim,-1, halo_number, free_param_value = config.get("tagging","ftag"), pynbody_path  = os.path.join(config.get_path('pynbody_path'),str(sim_name)),AHF_centers_filepath=hnumpath)
+        df_tagged_particles,l_sel = dtag.angmom_tag_over_full_sim_recursive(DMOsim,-1, halo_number, free_param_value = config.get("tagging","ftag"), pynbody_path  = os.path.join(config.get_path('pynbody_path'),str(sim_name)),AHF_centers_filepath=hnumpath)
         
     else:
-        df_tagged_particles = dtrace.angmom_tag_over_full_sim(DMOsim, halonumber=halo_number, free_param_value = config.get("tagging","ftag"), particle_storage_filename=None, mergers=mergers)
+        df_tagged_particles = dtag.angmom_tag_over_full_sim(DMOsim, halonumber=halo_number, free_param_value = config.get("tagging","ftag"), particle_storage_filename=None, mergers=mergers)
     
     return df_tagged_particles
 

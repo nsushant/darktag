@@ -3,7 +3,7 @@ import pynbody
 import pynbody.filt as f
 from pynbody.analysis.luminosity import get_current_ssp_table
 #from pynbody.analysis.luminosity import SSPTable
-from ..config import config 
+from ...config import config 
 
 def calc_3D_cm(particles,masses):
 

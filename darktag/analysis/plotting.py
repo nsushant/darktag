@@ -12,10 +12,10 @@ import os
 import matplotlib.style
 import matplotlib as mpl
 import seaborn as sns
-from darktrace.tagging.utils import *
-from darktrace.analysis.calculate import *
+from darktag.tagging.utils import *
+from darktag.analysis.calculate import *
 import edge_tangos_properties as etp
-from ..config import config 
+from ...config import config 
 
 #mpl.rcParams.update({'text.usetex': False})
 
