@@ -1,15 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling>=1.17"]
+build-backend = "hatchling.build"
 
 [project]
 name = "darktag"
 version = "1.0.0"
 description = "Particle tagging for dark matter simulations"
 readme = "README.md"
-license = "MIT"
+
 authors = [
-    {name = "Sushant Nigudkar"}
+    {name = "Sushanta Nigudkar"}
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -19,7 +19,7 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
-    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Astronomy"
 ]
 requires-python = ">=3.8"
 dependencies = [
@@ -29,13 +29,9 @@ dependencies = [
     "seaborn>=0.11.0",
     "scipy>=1.7.0",
     "scikit-learn>=0.24.0",
-]
-
-[project.optional-dependencies]
-astrophysics = [
-    "pynbody @ git+https://github.com/pynbody/pynbody.git",
-    "tangos @ git+https://github.com/pynbody/tangos.git", 
-    "darklight @ git+https://github.com/stacykim/darklight.git",
+    "pynbody @ git+https://github.com/pynbody/pynbody.git@main#egg=pynbody",
+    "tangos @ git+https://github.com/pynbody/tangos.git@main#egg=tangos",
+    "darklight @ git+https://github.com/stacykim/darklight.git@main#egg=darklight"
 ]
 keywords = ["astronomy", "astrophysics", "particle-tagging", "dark-matter", "simulations", "stellar-mass"]
 
@@ -44,6 +40,12 @@ Homepage = "https://github.com/nsushantnigudkar/darktag"
 Repository = "https://github.com/nsushantnigudkar/darktag"
 Issues = "https://github.com/nsushantnigudkar/darktag/issues"
 
-[tool.setuptools.packages.find]
-include = ["darktag*"]
-exclude = ["tests*"]
+[tool.hatch.build.targets.sdist]
+include = ["LICENSE", "README.md", "darktag/**/*"]
+
+[tool.hatch.build.targets.wheel]
+include = ["darktag/**/*"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
