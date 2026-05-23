@@ -28,9 +28,8 @@ import pandas as pd
 import darktag.tagging.angular_momentum_tagging as dtag
 from darktag.tagging.utils import *
 from darktag.analysis.calculate import *
-from sklearn.cluster import DBSCAN
-from collections import Counter
 from ...config import config
+from darktag.tagging.clustering import cluster_tagged_particles
 
 def get_child_iords(halo,dmo_particles,DMO_state='fiducial'):
 
@@ -392,63 +391,28 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
 
         particle_selection_reff_tot = DMOparticles_only_insitu[np.isin(DMOparticles_only_insitu['iord'],selected_iords_tot)] if len(selected_iords_tot)>0 else [] 
 
-        # -------- BGMM Implementation---------#
-            
-        x = particle_selection_reff_tot['x']
-        y = particle_selection_reff_tot['y']
-        z = particle_selection_reff_tot['z']
-            
-        if len(x)<=2 : 
+        clustering_cfg = config.get('tagging', 'clustering')
+        labels, best_label, _ = cluster_tagged_particles(
+            particles=particle_selection_reff_tot,
+            prev_iords=PrevBGMMIords if len(PrevBGMMIords) > 0 else None,
+            method=clustering_cfg.get('method', 'dbscan'),
+            feature_cols=clustering_cfg.get('features', ['x', 'y']),
+            scale=clustering_cfg.get('scale', False),
+            sample_weight=particle_selection_reff_tot['mass'],
+            eps=config.get_with_default('dbscan', 'eps', 0.05),
+            dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+            min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+            hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+            cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+            cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+        )
 
-            continue 
-            
-        xy = np.column_stack((x, y))
+        if best_label == -1:
+            continue
 
-        dbscan = DBSCAN(eps=0.05, min_samples=2)
-        dbscan.fit(xy, sample_weight = particle_selection_reff_tot['mass'])
-        labelsALL = dbscan.labels_
-
-            
-        prevp = particle_selection_reff_tot[np.isin(particle_selection_reff_tot['iord'],PrevBGMMIords.flatten())]
-
-
-
-        if (len(np.where(prevp == True)[0]) == 0):
-            print("largest cluster used, No previous particles")
-                #largest = np.argmax(gmm.weights_)                                                                                                                                       
-                
-            labels_no_noise = [label for label in labelsALL if label != -1]
-                
-            print("len labels_no_noise:", len(labels_no_noise))
-                
-            counter = Counter(labels_no_noise)
-                
-            largest_cluster_label, largest_cluster_size = counter.most_common(1)[0]
-                
-            largest = largest_cluster_label
-
-
-        else:
-
-
-            labels_prev = labelsALL[prevp]
-                
-            print("len labels_prev", len(labels_prev))
-                
-            labels_no_noise = [label for label in labels_prev if label != -1]
-        
-            counter = Counter(labels_no_noise)
-            largest_cluster_label, largest_cluster_size = counter.most_common(1)[0]
-
-            largest = largest_cluster_label
-
-
-
-
-            
-        particle_selection_reff_tot = particle_selection_reff_tot[np.where(labelsALL == largest)]
-        PrevBGMMIords = np.delete( PrevBGMMIords, np.arange(len(PrevBGMMIords)) )
-        PrevBGMMIords = np.append(PrevBGMMIords,np.asarray(particle_selection_reff_tot['iord']))
+        particle_selection_reff_tot = particle_selection_reff_tot[np.where(labels == best_label)]
+        PrevBGMMIords = np.delete(PrevBGMMIords, np.arange(len(PrevBGMMIords)))
+        PrevBGMMIords = np.append(PrevBGMMIords, np.asarray(particle_selection_reff_tot['iord']))
         pynbody.analysis.halo.center(particle_selection_reff_tot)
             
             

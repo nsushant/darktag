@@ -1,128 +1,74 @@
-
 # Darktag
 
 [![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://python.org)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-A Python package for assigning stellar mass to dark matter particles in dark matter-only simulations. The primary goal is to accurately reproduce the sizes and stellar mass distributions of dwarf galaxies using advanced particle tagging methods.
+A Python package for assigning stellar mass to dark matter particles in dark matter-only simulations. Reproduces the sizes and stellar mass distributions of dwarf galaxies using advanced particle tagging methods.
 
 ## Features
 
-- **Angular Momentum Tagging**: Associates stellar mass with dark matter particles using their angular momenta
-- **Spatial Tagging**: Distributes stellar mass across the galaxy based on a Plummer Profile
-- **Binding Energy Tagging**: Associates stellar mass with dark matter particles using their binding energies
-- **Centralized Configuration**: JSON-based configuration system for easy path management
-- **HALO Catalog Support**: Compatible with AHF and HOP halo catalogues
+- **Angular Momentum Tagging**: Assigns stellar mass to dark matter particles ranked by angular momentum
+- **Spatial Tagging**: Distributes stellar mass via a Plummer profile
+- **Binding Energy Tagging**: Assigns stellar mass to particles ranked by binding energy
+- **JSON Configuration**: Centralized path and parameter management
+- **AHF/HOP Halo Catalog Support**
 
 ## Installation
 
-### Full Installation (Recommended for Astrophysics Work)
-
-**Required for stellar mass growth histories:**
-
-```bash
-# Install core package
-pip install darktag
-
-# Install darklight from Git (latest development version)
-pip install darklight @ git+https://github.com/stacykim/darklight.git@main#egg=darklight
-```
-
-### Basic Installation (Core Functionality Only)
-
-```bash
-# Core functionality without darklight
-pip install darktag
-```
-
-**Important:** The darklight package on PyPI is a different package and not compatible with this workflow. Always install darklight from Git for the correct stellar mass growth history functionality.
-
-### Manual Installation (Troubleshooting)
-
-If automatic installation fails, install dependencies manually:
-
-```bash
-# Install core astrophysics packages from PyPI
-pip install pynbody tangos
-
-# Install darklight manually from Git (if needed)
-pip install darklight @ git+https://github.com/stacykim/darklight.git@main#egg=darklight
-```
-
-### Why Install darklight from Git?
-
-**Git-based installation is required because:**
-- **Latest features**: Access to the most recent updates and bug fixes
-- **Active development**: Darklight is under active development with frequent improvements
-- **Better compatibility**: Ensures compatibility with recent simulation formats
-- **Different package**: The darklight package on PyPI is a completely different package, not the astrophysics library
-- **Correct functionality**: Only the Git version provides the stellar mass growth history algorithms needed for particle tagging
-
-### Verify Installation
-
-```bash
-python -c "import darktag; print('✓ Darktag package installed successfully!')"
-```
-
-## Manual Installation
-
-For manual installation or troubleshooting, see [INSTALL.md](INSTALL.md) for detailed instructions.
-
 ### Dependencies
 
-#### Core Dependencies
-- **numpy** >= 1.20.0: Numerical computations
-- **pandas** >= 1.3.0: Data manipulation  
-- **matplotlib** >= 3.5.0: Basic plotting
-- **seaborn** >= 0.11.0: Statistical visualization
-- **scipy** >= 1.7.0: Scientific computing
-- **scikit-learn** >= 0.24.0: Machine learning utilities
+| Package | Version | Purpose |
+|---------|---------|---------|
+| numpy | >=1.20.0 | Numerical computations |
+| pandas | >=1.3.0 | Data manipulation |
+| pynbody | >=2.1 | Simulation snapshot I/O |
+| tangos | >=1.10.0 | Merger tree database |
+| darklight | git+ | Stellar mass growth histories |
+| scipy | >=1.7.0 | Scientific computing |
+| scikit-learn | >=0.24.0 | ML utilities |
+| matplotlib | >=3.5.0 | Plotting |
+| seaborn | >=0.11.0 | Statistical viz |
 
-#### Astrophysics Dependencies 
-- **pynbody** >= 2.1: Astrophysical simulation analysis (installed automatically)
-- **tangos** >= 1.10.0: Simulation database management (installed automatically)
-- **darklight**: Generates stellar mass growth histories (install with `[darklight]` extra)
-
-## Quick Start
-
-```python
-import tangos
-import darktag as dtag
-from config import config
-
-# Initialize tangos database
-tangos.core.init_db('your_simulation.db')
-DMO_database = tangos.get_simulation('your_simulation_name')
-
-# Perform particle tagging (uses config paths automatically)
-df_tagged_particles = dtag.tag_particles(
-    DMO_database, 
-    tagging_method='angular momentum',
-    free_param_val=0.001
-)
-
-# Calculate half-mass radii
-df_half_mass_tagged = dtag.calculate_rhalf(
-    DMO_database, 
-    df_tagged_particles
-)
+```bash
+pip install darktag
+pip install 'darktag[hdbscan]'    # optional: HDBSCAN clustering
+pip install darklight @ git+https://github.com/stacykim/darklight.git@main#egg=darklight
 ```
+
+**Important:** The `darklight` package on PyPI is a different package. Always install from Git.
 
 ## Configuration
 
-The package uses a simple JSON configuration system. Update paths in `config.json`:
+### config.json
+
+Set paths and parameters in `config.json` at the package root:
 
 ```json
 {
     "paths": {
-        "tangos_path": "/path/to/your/tangos/databases/",
-        "pynbody_path": "/path/to/your/pynbody/data/",
+        "tangos_path": "/path/to/tangos/databases/",
+        "pynbody_path": "/path/to/simulation/data/",
         "manual_halonum_path": "",
         "manual_mstar_path": ""
     },
     "tagging": {
         "method": "angular_momentum",
-        "ftag": 0.01
+        "ftag": 0.01,
+        "clustering": {
+            "method": "dbscan",
+            "features": ["x", "y"],
+            "scale": false
+        }
+    },
+    "dbscan": {
+        "eps": 0.05,
+        "min_samples": 2
+    },
+    "hdbscan": {
+        "min_cluster_size": 10,
+        "min_samples": null,
+        "cluster_selection_epsilon": 0.0,
+        "cluster_selection_method": "eom"
     },
     "darklight": {
         "n": 500,
@@ -132,172 +78,148 @@ The package uses a simple JSON configuration system. Update paths in `config.jso
 }
 ```
 
-### Accessing Configuration
+| Key | Description |
+|-----|-------------|
+| `paths.tangos_path` | Directory containing `.db` tangos database files |
+| `paths.pynbody_path` | Directory containing simulation snapshot directories |
+| `paths.manual_halonum_path` | Optional CSV for AHF halo number cross-references |
+| `paths.manual_mstar_path` | Optional manual stellar mass path |
+| `tagging.method` | Default tagging method |
+| `tagging.ftag` | Tagging fraction free parameter (default: 0.01) |
+| `tagging.clustering.method` | Clustering algorithm: `"dbscan"` or `"hdbscan"` |
+| `tagging.clustering.features` | Feature columns for clustering, e.g. `["x","y"]`, `["x","y","z"]`, or `["x","y","z","vx","vy","vz"]` |
+| `tagging.clustering.scale` | Whether to standardize features before clustering (`true`/`false`) |
+| `dbscan.eps` | DBSCAN neighbourhood radius |
+| `dbscan.min_samples` | DBSCAN minimum points per cluster |
+| `hdbscan.min_cluster_size` | HDBSCAN minimum points per cluster |
+| `hdbscan.min_samples` | HDBSCAN conservativeness (`null` = same as min_cluster_size) |
+| `hdbscan.cluster_selection_epsilon` | Max merge distance for HDBSCAN (0.0 = pure hierarchical) |
+| `hdbscan.cluster_selection_method` | `"eom"` (balanced) or `"leaf"` (fine-grained) |
+| `darklight.n` | Number of darklight Monte Carlo realizations (default: 500) |
+| `darklight.DMO_OR_HYDRO` | `"DMO"` or `"HYDRO"` |
+| `darklight.poccupied` | Occupation regime: `"all"`, `"nadler20"`, `"edge1"`, `"edgert"` |
+
+### Accessing config
 
 ```python
-from config import config
+from darktag.config import config
 
-# Get specific paths
-tangos_path = config.get_path('tangos_path')
-pynbody_path = config.get_path('pynbody_path')
-
-# Get configuration values
-ftag = config.get('tagging', 'ftag')
-method = config.get('tagging', 'method')
-
-# Get all paths
-all_paths = config.get_all_paths()
+config.get_path('tangos_path')                      # path string
+config.get('tagging', 'ftag')                        # 0.01
+config.get_all_paths()                                # all path key-value pairs
 ```
 
-Update the paths to point to your simulation data and tangos databases.
+**Override config file:** set the `DARKTAG_CONFIG` environment variable:
+```bash
+export DARKTAG_CONFIG=/custom/path/config.json
+```
+
+**Reload at runtime:**
+```python
+config.reload('/another/config.json')
+```
 
 ## Usage
 
-### Available Tagging Methods
-
-1. **Angular Momentum**: `tagging_method='angular momentum'`
-2. **Angular Momentum Recursive**: `tagging_method='angular momentum recursive'`  
-3. **Spatial**: `tagging_method='spatial'`
-
-### Advanced Configuration
-
-The package supports various parameters for fine-tuning:
-
-- `free_param_val`: Free parameter for tagging method (default: 0.01)
-- `include_mergers`: Whether to include merger events (default: True)
-- `halonumber`: Specific halo number to analyze (default: 1)
-- `path_to_particle_data`: Path to particle data (uses config if None)
-
-### Complete Example
+### 1. Tag particles
 
 ```python
 import tangos
 import darktag as dtag
-from config import config
 
-# Initialize tangos database
-tangos.core.init_db('your_simulation.db')
-DMO_database = tangos.get_simulation('your_simulation_name')
+tangos.core.init_db('/path/to/simulation.db')
+sim = tangos.get_simulation('Halo1459_DMO')
 
-# Perform particle tagging with custom parameters
-df_tagged_particles = dtag.tag_particles(
-    DMO_database, 
+df = dtag.tag_particles(
+    DMO_database=sim,
+    tagging_method='angular momentum',     # see methods below
+    free_param_val=0.001,                   # tagging fraction
+    include_mergers=True,                    # include accreted halos
+    halonumber=1,                            # halo to analyze
+    path_to_particle_data=None               # overrides config pynbody_path
+)
+```
+
+Returns a DataFrame with columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `iords` | int64 | Particle IDs |
+| `mstar` | float64 | Tagged stellar mass per particle per snapshot (Msun) |
+| `t` | float64 | Time (Gyr) |
+| `z` | float64 | Redshift |
+| `type` | str | `"insitu"` (main halo) or `"accreted"` (merging halo) |
+
+### 2. Calculate half-mass radii
+
+```python
+df_reff = dtag.calculate_rhalf(sim, df)
+
+# Full version with more options:
+df_reff = dtag.calculate_reffs_over_full_sim(
+    DMOsim=sim,
+    particles_tagged=df,
+    pynbody_path=None,
+    path_AHF_halonums=None
+)
+```
+
+### Available tagging methods
+
+| Method string | Function | Description |
+|---|---|---|
+| `'angular momentum'` | `angmom_tag_over_full_sim()` | Tags lowest-AM particles; non-recursive |
+| `'angular momentum recursive'` | `angmom_tag_over_full_sim_recursive()` | Tags lowest-AM particles; recursive down merger tree |
+| `'spatial'` | `spatial_tag_over_full_sim()` | Distributes mass via Plummer profile |
+
+> **Binding energy** tagging (`BE_tag_over_full_sim`) is available as a direct function call but is not yet wired into the `tag_particles` dispatcher.
+
+### EDGE simulation wrappers
+
+```python
+from darktag.edge.angular_momentum_tagging import angmom_tag_particles_edge
+
+df = angmom_tag_particles_edge(
+    sim_name='Halo1459_DMO',
     tagging_method='angular momentum',
-    free_param_val=0.001,
-    include_mergers=True,
-    halonumber=1
-)
-
-# Calculate half-mass radii
-df_half_mass_tagged = dtag.calculate_rhalf(
-    DMO_database, 
-    df_tagged_particles
+    ftag_val=0.001,
+    rec=False
 )
 ```
 
-### Available Tagging Methods
-
-1. **Angular Momentum**: `tagging_method='angular momentum'`
-2. **Spatial**: `tagging_method='spatial'`
-3. **Binding Energy**: `tagging_method='binding energy'`
-
-### Advanced Configuration
-
-The package supports various parameters for fine-tuning:
-
-- `free_param_val`: Free parameter for tagging method (default: 0.01)
-- `include_mergers`: Whether to include merger events (default: True)
-- `halonumber`: Specific halo number to analyze (default: 1)
-
-## Examples
-
-See the `examples/` directory for complete tutorial scripts:
-
-- `tutorial_1_getting_started.py`: Basic particle tagging workflow
-- `tutorial_2_plotting_stellar_mass_distributions.py`: Plotting and analysis
-
-Run the example:
-```bash
-cd examples
-python tutorial_1_getting_started.py
-```
-
-## Data Requirements
-
-The tagging methods require:
-- **Tangos databases** with merger trees
-- **Pynbody particle data** 
-- **AHF or HOP halo catalogues**
+Other EDGE wrappers: `BE_tag_particles_edge`, `spatial_tag_particles`, `angmom_calculate_reffs`.
 
 ## Testing
 
-Run the test suite to verify installation:
-
 ```bash
-python test.py
+pip install pytest
+pytest tests/
 ```
 
-## Examples
+Tests cover the `Config` class and pure-logic utility functions. Tests for functions requiring `pynbody`/`tangos`/`darklight` are skipped when those packages are unavailable.
 
-See the `examples/` directory for complete tutorial scripts:
+## Example workflow
 
-- `tutorial_1_getting_started.py`: Basic particle tagging workflow
-- `tutorial_2_plotting_stellar_mass_distributions.py`: Plotting and analysis
-- `config_demo.py`: Configuration system demonstration
-
-Run the examples:
-```bash
-cd examples
-python tutorial_1_getting_started.py
-```
-
-## Performance Considerations
-
-- **Memory usage**: Large simulations may require substantial RAM
-- **Computational time**: Angular momentum tagging is typically faster than binding energy methods
-- **Parallel processing**: Use appropriate HPC resources for large simulation batches
-- **Storage**: Ensure adequate disk space for intermediate particle storage files
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Path not found**: Check `config.json` paths are correct and accessible
-2. **Database errors**: Ensure tangos_path points to valid .db files
-3. **Particle data missing**: Verify pynbody_path contains simulation outputs
-4. **Permission errors**: Make sure paths are accessible with current permissions
-5. **Memory errors**: Reduce simulation size or use a machine with more RAM
-
-### Debug Mode
-
-Add debug prints to verify configuration:
 ```python
-from config import config
-print(f"Using tangos path: {config.get_path('tangos_path')}")
-print(f"Using pynbody path: {config.get_path('pynbody_path')}")
+import tangos
+import darktag as dtag
+from darktag.config import config
+
+# 1. Check paths
+print(config.get_path('tangos_path'))
+print(config.get_path('pynbody_path'))
+
+# 2. Init simulation
+tangos.core.init_db(config.get_path('tangos_path') + 'Halo1459.db')
+sim = tangos.get_simulation('Halo1459_DMO')
+
+# 3. Tag particles
+df = dtag.tag_particles(sim, tagging_method='angular momentum', free_param_val=0.001)
+
+# 4. Half-mass radii
+df_reff = dtag.calculate_rhalf(sim, df)
+
+# 5. Inspect results
+print(df.head())
+print(f"Tagged {len(df)} particle-snapshot rows")
 ```
-
-## Contributing
-
-1. Submit a pull request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Citation
-
-If you use this package in your research, please cite:
-
-```bibtex
-@software{darktag,
-  title={Darktag: Particle Tagging for Dark Matter Simulations},
-  author={Nigudkar, Sushanta},
-  year={2024},
-  url={https://github.com/nsushantnigudkar/darktag}
-}
-```
-
-## Support
-
-For questions, issues, or contributions, please open an issue on the GitHub repository.

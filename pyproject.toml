@@ -35,6 +35,10 @@ dependencies = [
 ]
 
 
+[project.optional-dependencies]
+hdbscan = ["hdbscan>=0.8.33"]
+
+
 keywords = ["astronomy", "astrophysics", "particle-tagging", "dark-matter", "simulations", "stellar-mass"]
 
 [project.urls]
@@ -44,9 +48,16 @@ Issues = "https://github.com/nsushantnigudkar/darktag/issues"
 
 [tool.hatch.build.targets.sdist]
 include = ["LICENSE", "README.md", "darktag/**/*", "config.py", "config.json"]
+exclude = ["darktag/tests*"]
 
 [tool.hatch.build.targets.wheel]
 include = ["darktag/**/*", "config.py", "config.json"]
+exclude = ["darktag/tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = ["ignore::SyntaxWarning"]
 
 
 

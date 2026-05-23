@@ -1,9 +1,27 @@
-from .tagging_wrapper_func import * 
-from .spatial_tagging import * 
-from .angular_momentum_tagging import *
-#from .angular_momentum_tagging_hydrodynamic_sim import *
-#from .angular_momentum_tagging_HYDRO_ARRAYS import *
-#from .angular_momentum_tagging_HYDRO_DM import *
-from .binding_energy_tagging import *
-from .utils import * 
+try:
+    from .tagging_wrapper_func import *
+except ImportError:
+    pass
+
+try:
+    from .spatial_tagging import *
+except ImportError:
+    pass
+
+try:
+    from .angular_momentum_tagging import *
+except ImportError:
+    pass
+
+try:
+    from .binding_energy_tagging import *
+except ImportError:
+    pass
+
+try:
+    from .utils import *
+except ImportError:
+    pass
+
+from .clustering import * 
 
