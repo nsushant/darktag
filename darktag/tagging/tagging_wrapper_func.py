@@ -66,11 +66,11 @@ def tag_particles(DMO_database, path_to_particle_data = None, tagging_method = '
         
         df_tagged = angmom_tag_over_full_sim(DMO_database, halonumber, free_param_value = free_param_val, pynbody_path  = path_to_particle_data, mergers = include_mergers)
 
-    if tagging_method == "angular momentum recursive":
+    elif tagging_method == "angular momentum recursive":
 
         df_tagged,l = angmom_tag_over_full_sim_recursive(DMO_database, -1, halonumber, free_param_value = free_param_val, pynbody_path  = path_to_particle_data )
 
-    if tagging_method == 'spatial' : 
+    elif tagging_method == 'spatial' : 
         
         df_tagged = spatial_tag_over_full_sim(DMO_database, pynbody_path  = path_to_particle_data, occupation_frac = 'all', particle_storage_filename=None, mergers= include_mergers)
     
@@ -78,7 +78,7 @@ def tag_particles(DMO_database, path_to_particle_data = None, tagging_method = '
 
 
 
-def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0):
+def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0, reffs_fname='reffs.csv'):
     
     # Use config path if pynbody_path not provided
     if pynbody_path is None:
@@ -175,7 +175,7 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
     PE_energy = np.array([])
     lum_based_halflight = np.array([])
 
-    AHF_centers = pd.read_csv(str(AHF_centers_file)) if AHF_centers_supplied == True else None
+    AHF_centers = pd.read_csv(str(path_AHF_halonums)) if AHF_centers_supplied == True else None
             
     for i in range(len(outputs)):
 

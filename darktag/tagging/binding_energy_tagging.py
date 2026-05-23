@@ -168,9 +168,9 @@ def tag(DMOparticles, hDMO, snapshot_stellar_mass,free_param_value = 0.01):
     
     
     '''
-    particles_ordered_by_angmom = rank_order_particles_by_angmom(DMOparticles)
+    particles_ordered_by_BE = rank_order_particles_by_BE(DMOparticles, hDMO)
 
-    return assign_stars_to_particles(snapshot_stellar_mass,particles_ordered_by_angmom, free_param_value)
+    return assign_stars_to_particles(snapshot_stellar_mass, particles_ordered_by_BE, free_param_value)
     
 
 # under construction

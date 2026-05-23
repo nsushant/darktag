@@ -806,13 +806,11 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
                 continue                                                                                                                                                                                      
             
             DMOparticles_insitu_only = DMOparticles.dm[sqrt(DMOparticles.dm['pos'][:,0]**2 + DMOparticles.dm['pos'][:,1]**2 + DMOparticles.dm['pos'][:,2]**2) <= r200c_pyn ] #hDMO['r200c']]
-        
-            DMOparticles_insitu_only = DMOparticles_insitu_only.dm
-            #uncomment to remove subhalos from tagging insitu 
 
+            #uncomment to remove subhalos from tagging insitu 
             ####DMOparticles_insitu_only = DMOparticles_insitu_only[np.logical_not(np.isin(DMOparticles_insitu_only['iord'],subhalo_iords))]
             
-            particles_sorted_by_angmom = rank_order_particles_by_angmom( DMOparticles_insitu_only.dm)
+            particles_sorted_by_angmom = rank_order_particles_by_angmom(DMOparticles_insitu_only)
             
             if particles_sorted_by_angmom.shape[0] == 0:
                 continue

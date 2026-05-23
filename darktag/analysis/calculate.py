@@ -129,7 +129,7 @@ def calc_mags_tagged(particle_ages,masses,band='V'):
 
 
 def calculate_x(pos,ndim):
-    return ((pos[:, 0:ndim] ** 2).sum(axis=1)) ** (1, 2)
+    return ((pos[:, 0:ndim] ** 2).sum(axis=1)) ** 0.5
 
 
 

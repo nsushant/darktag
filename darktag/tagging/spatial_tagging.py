@@ -116,11 +116,9 @@ def prod_binned_df(z_val, mstar, mass_select, chosen_parts, DMOparticles, hDMO,i
 
         print('removal of duplicates took place')
         
-        ignore_these = [iords_of_parts.index(i) for i in iords_of_parts if i in chosen_parts]
-        
-        iords_of_parts = np.delete(iords_of_parts,ignore_these)
-        
-        positions_of_parts = np.delete(positions_of_parts,ignore_these,axis=0)
+        mask = np.isin(iords_of_parts, chosen_parts)
+        iords_of_parts = iords_of_parts[~mask]
+        positions_of_parts = positions_of_parts[~mask]
     
 
     # get 3d pos vec magnitude array 

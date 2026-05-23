@@ -129,7 +129,7 @@ def tag(DMOparticles, hDMO, snapshot_stellar_mass,free_param_value = 0.01, previ
     
 
 
-def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, particle_storage_filename=None, mergers = True):
+def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, particle_storage_filename=None, mergers = True, AHF_centers_file=None, occupation_frac='all'):
     
     '''
 
@@ -491,10 +491,10 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, pa
     
         print("Done with iteration",i)
 
-        df_tagged_particles = pd.DataFrame({'iords':tagged_iords_to_write, 'mstar':tagged_mstars_to_write,'t':ts_to_write,'z':zs_to_write,'type':tagged_types_to_write})
+    df_tagged_particles = pd.DataFrame({'iords':tagged_iords_to_write, 'mstar':tagged_mstars_to_write,'t':ts_to_write,'z':zs_to_write,'type':tagged_types_to_write})
 
-        if particle_storage_filename != None:
-            df_tagged_particles.to_csv(particle_storage_filename)
+    if particle_storage_filename != None:
+        df_tagged_particles.to_csv(particle_storage_filename)
             
     return df_tagged_particles
 

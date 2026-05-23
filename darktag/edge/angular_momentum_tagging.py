@@ -218,11 +218,11 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
     shortname = split[0][4:]
     halonum = shortname[:]
 
-    if simname[-3] == 'x':
-        DMOname = 'Halo'+halonum+'_DMO_'+'Mreion'+simname[-3:]
+    if sim_name[-3] == 'x':
+        DMOname = 'Halo'+halonum+'_DMO_'+'Mreion'+sim_name[-3:]
 
     else:
-        DMOname = simname
+        DMOname = sim_name
     
     
     tangos.init_db(join(config.get_path("tangos_path"),str(split[0]+".db")))
@@ -233,12 +233,12 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
     
     red_all =  main_halo.calculate_for_progenitors('z()')[0][::-1]
     t_all =  main_halo.calculate_for_progenitors('t()')[0][::-1]
-        
+
+    data_particles = pd.read_csv(particles_tagged) if from_file else particles_tagged
+    data_t = np.asarray(data_particles['t'].values)
         
     if ( len(red_all) != len(outputs) ):
         print('output array length does not match redshift and time arrays')
-        data_particles = pd.read_csv(particles_tagged)
-        data_t = np.asarray(data_particles['t'].values)
         return 0 
 
         
@@ -403,11 +403,6 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
             continue 
             
         xy = np.column_stack((x, y))
-
-
-
-        labelsALL = gmm.predict(xy)
-            
 
         dbscan = DBSCAN(eps=0.05, min_samples=2)
         dbscan.fit(xy, sample_weight = particle_selection_reff_tot['mass'])
