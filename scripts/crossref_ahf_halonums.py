@@ -206,7 +206,12 @@ def main():
         prev_iords = np.asarray(dm_all['iord'])
         print(f'  Clustering: no cluster found, using all {len(prev_iords)} particles')
 
-    cat = pynbody.halo.ahf.AHFCatalogue(s, halo_numbers='v1')
+    del s
+    s = pynbody.load(pjoin(pynbody_path, outputs[-1]))
+    s.physical_units()
+
+    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+    cat = s.halos(halo_numbers='v1')
 
     best_ahf, overlap, mass = mass_filtered_search(
         cat, prev_iords, max_ahf,
@@ -220,6 +225,8 @@ def main():
 
     print(f'  Best AHF halo: {best_ahf} (overlap={overlap}, mass={mass:.3e})')
     results.append({'snapshot': outputs[-1], 'AHF halonum': best_ahf})
+
+    del s
 
     print(f'\n{"="*60}')
     print(f'Phase 2: Tracking backwards through {len(outputs) - 1} snapshots')
@@ -236,7 +243,8 @@ def main():
             print(f'  Could not load ({e}), skipping')
             continue
 
-        cat = pynbody.halo.ahf.AHFCatalogue(s, halo_numbers='v1')
+        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        cat = s.halos(halo_numbers='v1')
 
         best_ahf, overlap, mass = mass_filtered_search(
             cat, prev_iords, max_ahf,
