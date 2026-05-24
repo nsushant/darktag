@@ -1,5 +1,5 @@
 import numpy as np
-from darktag.darktag.tagging.clustering import (
+from darktag.tagging.clustering import (
     _extract_features,
     _select_best_label,
     cluster_tagged_particles,

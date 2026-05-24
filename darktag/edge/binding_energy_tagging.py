@@ -31,7 +31,7 @@ from ..tagging import binding_energy_tagging as dtag
 from ..tagging.utils import *
 from ..analysis.calculate import *
 from ..tagging.clustering import cluster_tagged_particles
-from ...config import config
+from ..config import config
 
 
 def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):

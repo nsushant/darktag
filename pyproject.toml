@@ -43,11 +43,11 @@ Repository = "https://github.com/nsushantnigudkar/darktag"
 Issues = "https://github.com/nsushantnigudkar/darktag/issues"
 
 [tool.hatch.build.targets.sdist]
-include = ["LICENSE", "README.md", "darktag/**/*", "config.py", "config.json"]
+include = ["LICENSE", "README.md", "darktag/**/*"]
 exclude = ["darktag/tests*"]
 
 [tool.hatch.build.targets.wheel]
-include = ["darktag/**/*", "config.py", "config.json"]
+include = ["darktag/**/*"]
 exclude = ["darktag/tests*"]
 
 [tool.pytest.ini_options]

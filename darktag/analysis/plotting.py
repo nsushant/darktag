@@ -17,7 +17,7 @@ try:
     import edge_tangos_properties as etp
 except ImportError:
     etp = None
-from ...config import config 
+from ..config import config 
 
 #mpl.rcParams.update({'text.usetex': False})
 

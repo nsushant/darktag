@@ -25,4 +25,7 @@ try:
 except ImportError as e:
     warnings.warn(f"utils could not be loaded: {e}")
 
-from .clustering import *
+try:
+    from .clustering import *
+except ImportError as e:
+    warnings.warn(f"clustering could not be loaded: {e}")

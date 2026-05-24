@@ -6,7 +6,11 @@ particle clusters in phase space.
 """
 
 import numpy as np
-from sklearn.cluster import DBSCAN, HDBSCAN
+from sklearn.cluster import DBSCAN
+try:
+    from sklearn.cluster import HDBSCAN
+except ImportError:
+    HDBSCAN = None
 from collections import Counter
 
 

@@ -1,0 +1,44 @@
+{ 
+    "paths":{
+      
+      "tangos_path":"/scratch/dp324/shared/dp101/EDGE/tangos/",
+      "pynbody_path":"/scratch/dp324/shared/dp101/EDGE/",
+      "manual_halonum_path":"",
+      "manual_mstar_path":""
+              
+    }, 
+
+    "tagging":{
+        
+      "method":"angular_momentum",
+      "ftag":0.01,
+      "clustering": {
+        "method": "dbscan",
+        "features": ["x", "y"],
+        "scale": false
+      }
+      
+    },
+
+    "dbscan": {
+      "eps": 0.05,
+      "min_samples": 2
+    },
+
+    "hdbscan": {
+      "min_cluster_size": 10,
+      "min_samples": null,
+      "cluster_selection_epsilon": 0.0,
+      "cluster_selection_method": "eom",
+      "allow_single_cluster": true,
+      "max_cluster_size": null
+    },
+
+    "darklight":{
+
+      "n":500, 
+      "DMO_OR_HYDRO":"DMO",
+      "poccupied":"all"
+    } 
+
+}

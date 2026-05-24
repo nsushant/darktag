@@ -1,24 +1,23 @@
 """
 HOP-based angular momentum tagging.
 
-Usage:
+Usage (after pip install -e . from repo root):
     python scripts/run_tagging_hop.py Halo1459_DMO --ftag 0.01
 """
 
 import sys
 import os
-import importlib.util
 from os.path import join as pjoin
 
-_REPO_ROOT = os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..'))
-sys.path.insert(0, _REPO_ROOT)
+# Allow running without pip install by adding the repo root to sys.path.
+# Has no effect if darktag is already installed in the active environment.
+sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..')))
+
+# darklight is not on PyPI — it is expected to be cloned into ~ or installed
+# separately. See INSTALL.md.
 sys.path.insert(0, os.path.expanduser('~'))
 
-_spec = importlib.util.spec_from_file_location('darktag_config', pjoin(_REPO_ROOT, 'config.py'))
-_mod = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mod)
-config = _mod.config
-
+from darktag.config import config
 from darktag.tagging.angular_momentum_tagging_hydrodynamic_sim import angmom_tag_over_full_sim_recursive
 
 

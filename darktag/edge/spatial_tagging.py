@@ -26,7 +26,7 @@ from tangos.examples.mergers import get_mergers_of_major_progenitor
 
 from ..tagging.spatial_tagging import *
 from ..tagging.utils import *
-from ...config import config
+from ..config import config
 
 
 def help():
