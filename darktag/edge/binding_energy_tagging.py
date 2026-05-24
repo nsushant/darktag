@@ -29,6 +29,7 @@ from ..tagging import binding_energy_tagging as dtag
 from ..tagging.utils import *
 from ..analysis.calculate import *
 from ...config import config
+from ..tagging.clustering import cluster_tagged_particles
 
 
 def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):
@@ -327,6 +328,7 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,AHF_centers_fi
         KE_energy = np.array([])
         PE_energy = np.array([])
         lum_based_halflight = np.array([])
+        PrevBGMMIords = np.array([])
 
         AHF_centers = pd.read_csv(str(AHF_centers_file)) if AHF_centers_supplied == True else None
                 
@@ -435,6 +437,34 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,AHF_centers_fi
             particle_selection_reff_tot = DMOparticles[np.isin(DMOparticles['iord'],selected_iords_tot)] if len(selected_iords_tot)>0 else []
 
             particles_only_insitu = DMOparticles[np.isin(DMOparticles['iord'],selected_iords_insitu_only)] if len(selected_iords_insitu_only) > 0 else []
+
+            if len(particle_selection_reff_tot) > 0:
+                clustering_cfg = config.get('tagging', 'clustering')
+                masses_for_clustering = np.array([
+                    data_grouped.loc[iord]['mstar']
+                    for iord in particle_selection_reff_tot['iord']
+                ])
+                labels, best_label, _ = cluster_tagged_particles(
+                    particles=particle_selection_reff_tot,
+                    prev_iords=PrevBGMMIords if len(PrevBGMMIords) > 0 else None,
+                    method=clustering_cfg.get('method', 'dbscan'),
+                    feature_cols=clustering_cfg.get('features', ['x', 'y']),
+                    scale=clustering_cfg.get('scale', False),
+                    sample_weight=masses_for_clustering,
+                    eps=config.get_with_default('dbscan', 'eps', 0.05),
+                    dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+                    min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+                    hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+                    cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+                    cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+                    allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+                    max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+                )
+                if best_label == -1:
+                    continue
+                particle_selection_reff_tot = particle_selection_reff_tot[np.where(labels == best_label)]
+                PrevBGMMIords = np.delete(PrevBGMMIords, np.arange(len(PrevBGMMIords)))
+                PrevBGMMIords = np.append(PrevBGMMIords, np.asarray(particle_selection_reff_tot['iord']))
 
             print('m200 value---->',hDMO['M200c'])
             
