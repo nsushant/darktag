@@ -1,0 +1,261 @@
+"""
+Cross-reference AHF halo numbers with tangos/HOP halos
+by matching DM particle iords across snapshots.
+
+Usage:
+    python scripts/crossref_ahf_halonums.py Halo1459_DMO
+    python scripts/crossref_ahf_halonums.py Halo1459_DMO --max-ahf 500 --mass-tol 0.3 -o ahf_halonums.csv
+"""
+
+import sys
+import os
+import argparse
+import multiprocessing as mp
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from config import config
+from darktag.tagging.clustering import cluster_tagged_particles
+
+
+def load_indexing_data(DMOsim, halo_number):
+    main_halo = DMOsim.timesteps[-1].halos[int(halo_number) - 1]
+
+    halonums = main_halo.calculate_for_progenitors('halo_number()')[0][::-1]
+
+    t_all = main_halo.calculate_for_progenitors('t()')[0][::-1]
+    red_all = main_halo.calculate_for_progenitors('z()')[0][::-1]
+
+    outputs = np.array([
+        DMOsim.timesteps[i].__dict__['extension']
+        for i in range(len(DMOsim.timesteps))
+    ])
+    times_tangos = np.array([
+        DMOsim.timesteps[i].__dict__['time_gyr']
+        for i in range(len(DMOsim.timesteps))
+    ])
+
+    valid_outputs = outputs[np.isin(times_tangos, t_all)]
+    valid_outputs.sort()
+
+    return t_all, red_all, main_halo, halonums, valid_outputs
+
+
+def check_ahf_halo_mass(args):
+    key, ahf_cat, prev_iords, expected_m200, mass_tol = args
+    try:
+        h = ahf_cat[key]
+        total_mass = h.dm['mass'].sum()
+        if expected_m200 is not None:
+            if total_mass < expected_m200 * mass_tol or total_mass > expected_m200 / mass_tol:
+                return key, 0, total_mass
+        iords = h.dm['iord']
+        overlap = len(np.intersect1d(iords, prev_iords, assume_unique=True))
+        return key, overlap, total_mass
+    except Exception:
+        return key, 0, 0
+
+
+def mass_filtered_search(ahf_cat, prev_iords, max_ahf,
+                         expected_m200=None, mass_tol=0.3,
+                         parallel=False, num_workers=None):
+    keys = sorted(ahf_cat.keys())[:max_ahf]
+    if not keys:
+        return -1, 0, 0
+
+    task_args = [(k, ahf_cat, prev_iords, expected_m200, mass_tol) for k in keys]
+
+    if parallel and len(keys) > 1:
+        with mp.Pool(num_workers) as pool:
+            results = pool.map(check_ahf_halo_mass, task_args)
+    else:
+        results = [check_ahf_halo_mass(a) for a in task_args]
+
+    best = -1
+    best_overlap = 0
+    best_mass = 0
+    for key, overlap, mass in results:
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = key
+            best_mass = mass
+
+    return best, best_overlap, best_mass
+
+
+def main():
+    import pynbody
+    from os.path import join as pjoin
+    import tangos
+
+    parser = argparse.ArgumentParser(
+        description='Cross-reference AHF halo numbers with tangos/HOP halos'
+    )
+    parser.add_argument('sim_name', help='Tangos simulation name (e.g. Halo1459_DMO)')
+    parser.add_argument('--max-ahf', type=int, default=500,
+                        help='Max AHF halos to search per snapshot (default: 500)')
+    parser.add_argument('--mass-tol', type=float, default=0.3,
+                        help='Mass tolerance for AHF halo filtering (default: 0.3)')
+    parser.add_argument('--parallel', action='store_true',
+                        help='Parallelise AHF halo search')
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='Number of worker processes (default: CPU count)')
+    parser.add_argument('-o', '--output', default=None,
+                        help='Output CSV path (default: <pynbody_path>/<sim_name>/ahf_halonums.csv)')
+    args = parser.parse_args()
+
+    sim_name = args.sim_name
+    max_ahf = args.max_ahf
+    mass_tol = args.mass_tol
+    parallel = args.parallel
+    num_workers = args.num_workers or mp.cpu_count()
+
+    tangos_path = config.get_path('tangos_path')
+    pynbody_path = pjoin(config.get_path('pynbody_path'), sim_name)
+
+    print(f'Initialising tangos DB: {pjoin(tangos_path, sim_name.split("_")[0] + ".db")}')
+    tangos.core.init_db(pjoin(tangos_path, sim_name.split('_')[0] + '.db'))
+    sim = tangos.get_simulation(sim_name)
+
+    t_all, red_all, main_halo, halonums, outputs = load_indexing_data(sim, 1)
+    print(f'Found {len(outputs)} snapshots')
+
+    try:
+        main_halo_end = sim.timesteps[-1].halos[int(halonums[-1]) - 1]
+        expected_m200 = float(main_halo_end['M200c'])
+        print(f'Expected M200 from tangos: {expected_m200:.3e} Msun')
+    except Exception:
+        expected_m200 = None
+        print('Could not get M200 from tangos, skipping mass filter')
+
+    hdbscan_kwargs = dict(
+        method='hdbscan',
+        feature_cols=config.get('tagging', 'clustering').get('features', ['x', 'y', 'vx', 'vy', 'vz']),
+        scale=config.get('tagging', 'clustering').get('scale', False),
+        min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+        hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+        cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+        cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+        allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+        max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+    )
+
+    results = []
+    prev_iords = None
+
+    print(f'\n{"="*60}')
+    print(f'Phase 1: Bootstrap at z=0 ({outputs[-1]})')
+    print(f'{"="*60}')
+
+    s = pynbody.load(pjoin(pynbody_path, outputs[-1]))
+
+    pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+    h_hop = s.halos()[int(halonums[-1]) - 1]
+    s.physical_units()
+    pynbody.analysis.halo.center(h_hop.dm)
+
+    try:
+        r200 = pynbody.analysis.halo.virial_radius(
+            h_hop.d, overden=200, r_max=None, rho_def='critical'
+        )
+        dm = h_hop.dm[h_hop.dm['r'] < r200]
+        print(f'  R200 = {r200:.3f} kpc, {len(dm)} DM particles within R200')
+    except Exception as e:
+        dm = h_hop.dm
+        print(f'  R200 failed ({e}), using all HOP DM ({len(dm)} particles)')
+
+    labels, best_label, _ = cluster_tagged_particles(particles=dm, **hdbscan_kwargs)
+
+    if best_label != -1:
+        prev_iords = np.asarray(dm['iord'][labels == best_label])
+        print(f'  HDBSCAN: cluster {best_label}, {len(prev_iords)} particles')
+    else:
+        prev_iords = np.asarray(dm['iord'])
+        print(f'  HDBSCAN: no cluster found, using all {len(prev_iords)} particles')
+
+    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+    cat = s.halos(halo_numbers='v1')
+
+    best_ahf, overlap, mass = mass_filtered_search(
+        cat, prev_iords, max_ahf,
+        expected_m200=expected_m200, mass_tol=mass_tol,
+        parallel=parallel, num_workers=num_workers,
+    )
+
+    if best_ahf == -1:
+        print('  ERROR: No AHF halo matched at bootstrap!')
+        sys.exit(1)
+
+    print(f'  Best AHF halo: {best_ahf} (overlap={overlap}, mass={mass:.3e})')
+    results.append({'snapshot': outputs[-1], 'AHF halonum': best_ahf})
+
+    print(f'\n{"="*60}')
+    print(f'Phase 2: Tracking backwards through {len(outputs) - 1} snapshots')
+    print(f'  mass_tol={mass_tol}, max_ahf={max_ahf}, parallel={parallel}')
+    print(f'{"="*60}')
+
+    for snap in reversed(outputs[:-1]):
+        print(f'\n  --- {snap} ---')
+
+        try:
+            s = pynbody.load(pjoin(pynbody_path, snap))
+            s.physical_units()
+        except Exception as e:
+            print(f'  Could not load ({e}), skipping')
+            continue
+
+        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        cat = s.halos(halo_numbers='v1')
+
+        best_ahf, overlap, mass = mass_filtered_search(
+            cat, prev_iords, max_ahf,
+            expected_m200=expected_m200, mass_tol=mass_tol,
+            parallel=parallel, num_workers=num_workers,
+        )
+
+        if best_ahf == -1:
+            print(f'  No AHF halo matched, skipping')
+            continue
+
+        h = cat[best_ahf]
+        pynbody.analysis.halo.center(h.dm)
+
+        try:
+            r200 = pynbody.analysis.halo.virial_radius(
+                h.d, overden=200, r_max=None, rho_def='critical'
+            )
+            dm = h.dm[h.dm['r'] < r200]
+        except Exception:
+            dm = h.dm
+
+        labels, best_label, _ = cluster_tagged_particles(
+            particles=dm, prev_iords=prev_iords, **hdbscan_kwargs
+        )
+
+        if best_label != -1:
+            prev_iords = np.asarray(dm['iord'][labels == best_label])
+            n = len(prev_iords)
+        else:
+            n = 0
+
+        print(f'  AHF halo {best_ahf} (overlap={overlap}, mass={mass:.3e}), '
+              f'HDBSCAN cluster {best_label} ({n} particles)')
+        results.append({'snapshot': snap, 'AHF halonum': best_ahf})
+
+    df = pd.DataFrame(results)
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    output_path = args.output or pjoin(pynbody_path, 'ahf_halonums.csv')
+    df.to_csv(output_path, index=False)
+
+    print(f'\n{"="*60}')
+    print(f'Saved: {output_path}')
+    print(f'{"="*60}')
+    print(df.to_string())
+
+
+if __name__ == '__main__':
+    mp.freeze_support()
+    main()
