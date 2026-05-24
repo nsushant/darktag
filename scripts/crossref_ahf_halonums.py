@@ -105,13 +105,16 @@ def main():
     parser.add_argument('-o', '--output', default=None,
                         help='Output CSV path (default: <pynbody_path>/<sim_name>/ahf_halonums.csv)')
     parser.add_argument('--r200-fraction', type=float, default=0.05,
-                        help='Fraction of R200 for HDBSCAN clustering (default: 0.05)')
+                        help='Fraction of R200 for clustering (default: 0.05)')
+    parser.add_argument('--cluster-max-particles', type=int, default=10000,
+                        help='Max particles for clustering (random downsample if exceeded, default: 10000)')
     args = parser.parse_args()
 
     sim_name = args.sim_name
     max_ahf = args.max_ahf
     mass_tol = args.mass_tol
     r200_frac = args.r200_fraction
+    cluster_max_particles = args.cluster_max_particles
     parallel = args.parallel
     num_workers = args.num_workers or mp.cpu_count()
 
@@ -133,17 +136,26 @@ def main():
         expected_m200 = None
         print('Could not get M200 from tangos, skipping mass filter')
 
-    hdbscan_kwargs = dict(
-        method='hdbscan',
-        feature_cols=config.get('tagging', 'clustering').get('features', ['x', 'y', 'vx', 'vy', 'vz']),
-        scale=config.get('tagging', 'clustering').get('scale', False),
-        min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
-        hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
-        cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
-        cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
-        allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
-        max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+    cluster_config = config.get('tagging', 'clustering')
+    cluster_kwargs = dict(
+        method=cluster_config.get('method', 'hdbscan'),
+        feature_cols=cluster_config.get('features', ['x', 'y']),
+        scale=cluster_config.get('scale', False),
     )
+    if cluster_kwargs['method'] == 'hdbscan':
+        cluster_kwargs.update(dict(
+            min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+            hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+            cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+            cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+            allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+            max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+        ))
+    elif cluster_kwargs['method'] == 'dbscan':
+        cluster_kwargs.update(dict(
+            eps=config.get_with_default('dbscan', 'eps', 0.05),
+            min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+        ))
 
     results = []
     prev_iords = None
@@ -166,20 +178,30 @@ def main():
         dm_all = h_hop.dm[h_hop.dm['r'] < r200]
         dm_cluster = dm_all[dm_all['r'] < r200 * r200_frac]
         print(f'  R200 = {r200:.3f} kpc, {len(dm_all)} DM within R200, '
-              f'{len(dm_cluster)} for HDBSCAN (r < {r200*r200_frac:.2f} kpc)')
+              f'{len(dm_cluster)} for clustering (r < {r200*r200_frac:.2f} kpc)')
     except Exception as e:
         dm_all = h_hop.dm
         dm_cluster = dm_all
         print(f'  R200 failed ({e}), using all HOP DM ({len(dm_all)} particles)')
 
-    labels, best_label, _ = cluster_tagged_particles(particles=dm_cluster, **hdbscan_kwargs)
+    n_cluster = len(dm_cluster)
+    if n_cluster > cluster_max_particles:
+        idx = np.random.choice(n_cluster, cluster_max_particles, replace=False)
+        dm_input = dm_cluster[idx]
+        print(f'  Downsampled {n_cluster} -> {cluster_max_particles} for clustering')
+    else:
+        dm_input = dm_cluster
+
+    labels, best_label, _ = cluster_tagged_particles(particles=dm_input, **cluster_kwargs)
 
     if best_label != -1:
-        prev_iords = np.asarray(dm_all['iord'][labels == best_label])
-        print(f'  HDBSCAN: cluster {best_label}, {len(prev_iords)} particles')
+        cluster_iords = np.asarray(dm_input['iord'][labels == best_label])
+        prev_iords = np.asarray(dm_all['iord'][np.isin(dm_all['iord'], cluster_iords)])
+        print(f'  Clustering: {cluster_kwargs["method"]} cluster {best_label}, '
+              f'{len(cluster_iords)} in cluster, expanded to {len(prev_iords)} from R200')
     else:
         prev_iords = np.asarray(dm_all['iord'])
-        print(f'  HDBSCAN: no cluster found, using all {len(prev_iords)} particles')
+        print(f'  Clustering: no cluster found, using all {len(prev_iords)} particles')
 
     pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
     cat = s.halos(halo_numbers='v1')
@@ -240,19 +262,27 @@ def main():
             dm_cluster = dm_all
             r200_str = 'all DM (R200 failed)'
 
+        n_cluster = len(dm_cluster)
+        if n_cluster > cluster_max_particles:
+            idx = np.random.choice(n_cluster, cluster_max_particles, replace=False)
+            dm_input = dm_cluster[idx]
+        else:
+            dm_input = dm_cluster
+
         labels, best_label, _ = cluster_tagged_particles(
-            particles=dm_cluster, prev_iords=prev_iords, **hdbscan_kwargs
+            particles=dm_input, prev_iords=prev_iords, **cluster_kwargs
         )
 
         if best_label != -1:
-            prev_iords = np.asarray(dm_all['iord'][labels == best_label])
+            cluster_iords = np.asarray(dm_input['iord'][labels == best_label])
+            prev_iords = np.asarray(dm_all['iord'][np.isin(dm_all['iord'], cluster_iords)])
             n = len(prev_iords)
         else:
             n = 0
 
         print(f'  AHF halo {best_ahf} (overlap={overlap}, mass={mass:.3e}), '
-              f'HDBSCAN cluster {best_label} ({n} particles'
-              f' from {len(dm_cluster)} within {r200_str})')
+              f'{cluster_kwargs["method"]} cluster {best_label} ({n} particles'
+              f' from {len(dm_input)} input within {r200_str})')
         results.append({'snapshot': snap, 'AHF halonum': best_ahf})
 
     df = pd.DataFrame(results)
