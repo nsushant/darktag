@@ -104,11 +104,14 @@ def main():
                         help='Number of worker processes (default: CPU count)')
     parser.add_argument('-o', '--output', default=None,
                         help='Output CSV path (default: <pynbody_path>/<sim_name>/ahf_halonums.csv)')
+    parser.add_argument('--r200-fraction', type=float, default=0.05,
+                        help='Fraction of R200 for HDBSCAN clustering (default: 0.05)')
     args = parser.parse_args()
 
     sim_name = args.sim_name
     max_ahf = args.max_ahf
     mass_tol = args.mass_tol
+    r200_frac = args.r200_fraction
     parallel = args.parallel
     num_workers = args.num_workers or mp.cpu_count()
 
@@ -160,19 +163,22 @@ def main():
         r200 = pynbody.analysis.halo.virial_radius(
             h_hop.d, overden=200, r_max=None, rho_def='critical'
         )
-        dm = h_hop.dm[h_hop.dm['r'] < r200]
-        print(f'  R200 = {r200:.3f} kpc, {len(dm)} DM particles within R200')
+        dm_all = h_hop.dm[h_hop.dm['r'] < r200]
+        dm_cluster = dm_all[dm_all['r'] < r200 * r200_frac]
+        print(f'  R200 = {r200:.3f} kpc, {len(dm_all)} DM within R200, '
+              f'{len(dm_cluster)} for HDBSCAN (r < {r200*r200_frac:.2f} kpc)')
     except Exception as e:
-        dm = h_hop.dm
-        print(f'  R200 failed ({e}), using all HOP DM ({len(dm)} particles)')
+        dm_all = h_hop.dm
+        dm_cluster = dm_all
+        print(f'  R200 failed ({e}), using all HOP DM ({len(dm_all)} particles)')
 
-    labels, best_label, _ = cluster_tagged_particles(particles=dm, **hdbscan_kwargs)
+    labels, best_label, _ = cluster_tagged_particles(particles=dm_cluster, **hdbscan_kwargs)
 
     if best_label != -1:
-        prev_iords = np.asarray(dm['iord'][labels == best_label])
+        prev_iords = np.asarray(dm_all['iord'][labels == best_label])
         print(f'  HDBSCAN: cluster {best_label}, {len(prev_iords)} particles')
     else:
-        prev_iords = np.asarray(dm['iord'])
+        prev_iords = np.asarray(dm_all['iord'])
         print(f'  HDBSCAN: no cluster found, using all {len(prev_iords)} particles')
 
     pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
@@ -226,22 +232,27 @@ def main():
             r200 = pynbody.analysis.halo.virial_radius(
                 h.d, overden=200, r_max=None, rho_def='critical'
             )
-            dm = h.dm[h.dm['r'] < r200]
+            dm_all = h.dm[h.dm['r'] < r200]
+            dm_cluster = dm_all[dm_all['r'] < r200 * r200_frac]
+            r200_str = f'r<{r200*r200_frac:.2f} kpc'
         except Exception:
-            dm = h.dm
+            dm_all = h.dm
+            dm_cluster = dm_all
+            r200_str = 'all DM (R200 failed)'
 
         labels, best_label, _ = cluster_tagged_particles(
-            particles=dm, prev_iords=prev_iords, **hdbscan_kwargs
+            particles=dm_cluster, prev_iords=prev_iords, **hdbscan_kwargs
         )
 
         if best_label != -1:
-            prev_iords = np.asarray(dm['iord'][labels == best_label])
+            prev_iords = np.asarray(dm_all['iord'][labels == best_label])
             n = len(prev_iords)
         else:
             n = 0
 
         print(f'  AHF halo {best_ahf} (overlap={overlap}, mass={mass:.3e}), '
-              f'HDBSCAN cluster {best_label} ({n} particles)')
+              f'HDBSCAN cluster {best_label} ({n} particles'
+              f' from {len(dm_cluster)} within {r200_str})')
         results.append({'snapshot': snap, 'AHF halonum': best_ahf})
 
     df = pd.DataFrame(results)
