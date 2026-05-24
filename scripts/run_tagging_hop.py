@@ -12,7 +12,7 @@ from os.path import join as pjoin
 sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(__file__), '..')))
 
 from config import config
-from darktag.tagging.tagging_wrapper_func import tag_particles
+from darktag.tagging.angular_momentum_tagging_hydrodynamic_sim import angmom_tag_over_full_sim_recursive
 
 
 def main():
@@ -36,13 +36,11 @@ def main():
     tangos.core.init_db(pjoin(tangos_path, sim_name.split('_')[0] + '.db'))
     sim = tangos.get_simulation(sim_name)
 
-    df = tag_particles(
-        sim,
-        path_to_particle_data=pynbody_path,
-        tagging_method='angular momentum recursive',
-        free_param_val=args.ftag,
-        include_mergers=args.mergers,
-        halonumber=args.halonumber,
+    df, _ = angmom_tag_over_full_sim_recursive(
+        sim, -1, args.halonumber,
+        free_param_value=args.ftag,
+        pynbody_path=pynbody_path,
+        mergers=args.mergers,
     )
 
     output = f'{sim_name}_tagged_hop.csv'
