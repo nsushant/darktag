@@ -12,6 +12,7 @@ from os.path import join as pjoin
 
 _REPO_ROOT = os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.expanduser('~'))
 
 _spec = importlib.util.spec_from_file_location('darktag_config', pjoin(_REPO_ROOT, 'config.py'))
 _mod = importlib.util.module_from_spec(_spec)

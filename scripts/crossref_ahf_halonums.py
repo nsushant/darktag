@@ -18,6 +18,7 @@ import importlib.util
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 sys.path.insert(0, _REPO_ROOT)
+sys.path.insert(0, os.path.expanduser('~'))
 
 _spec = importlib.util.spec_from_file_location('darktag_config', os.path.join(_REPO_ROOT, 'config.py'))
 _mod = importlib.util.module_from_spec(_spec)
