@@ -12,24 +12,26 @@ Depdencies include the general tagging function as well as analysis functions de
 #from memory_profiler import profile
 #import csv
 import os
-import pynbody
-import tangos
+import sys
+import gc
+import random
+
 import numpy as np
 from numpy import sqrt
-from darklight import DarkLight
-import darklight 
-from os import listdir
-from os.path import *
-import gc
-from tangos.examples.mergers import *     
-import random
-import sys
 import pandas as pd
+
+import pynbody
+import tangos
+from darklight import DarkLight
+from os import listdir
+from os.path import join, isdir
+from tangos.examples.mergers import get_mergers_of_major_progenitor
+
 from ..tagging import binding_energy_tagging as dtag
 from ..tagging.utils import *
 from ..analysis.calculate import *
-from ...config import config
 from ..tagging.clustering import cluster_tagged_particles
+from ...config import config
 
 
 def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):
@@ -64,7 +66,7 @@ def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):
 
 
 
-            if DMO_state == 'fiducial':
+            if DMOstate == 'fiducial':
 
                 if (len(halo_catalog[child].st['iord']) > 0 ):
 
@@ -86,8 +88,6 @@ def get_child_iords(halo,halo_catalog,DMOstate='fiducial'):
     return children_dm,children_st,sub_halonums
 
 
-
-pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
 def BE_tag_particles_edge(sim_name,occupation_fraction,fmb_percentage,PE_file = None,AHF_centers_file=None,mergers = True,AHF_centers_supplied=False,machine='astro',physics='edge1'):
     

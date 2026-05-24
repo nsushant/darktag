@@ -12,24 +12,25 @@ Depdencies include the general tagging function as well as analysis functions de
 #from memory_profiler import profile
 #import csv
 import os
-import pynbody
-import tangos
+import sys
+import gc
+import random
+
 import numpy as np
 from numpy import sqrt
-from darklight import DarkLight
-import darklight 
-from os import listdir
-from os.path import *
-import gc
-from tangos.examples.mergers import *     
-import random
-import sys
 import pandas as pd
+
+import pynbody
+import tangos
+from darklight import DarkLight
+from os.path import join
+from tangos.examples.mergers import get_mergers_of_major_progenitor
+
 from ..tagging import angular_momentum_tagging as dtag
 from ..tagging.utils import *
 from ..analysis.calculate import *
-from ...config import config
 from ..tagging.clustering import cluster_tagged_particles
+from ...config import config
 
 def get_child_iords(halo,dmo_particles,DMO_state='fiducial'):
 
@@ -107,20 +108,19 @@ def get_child_iords(halo,dmo_particles,DMO_state='fiducial'):
 
 
 
-pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-
 def angmom_tag_particles_edge(sim_name,halo_number=1,mergers = True, machine='dirac',physics='edge1',recursive=True):
-    
+
     '''
-    Function that tags particles based on angular momentum for DMOs in the EDGE suite.  
+    Function that tags particles based on angular momentum for DMOs in the EDGE suite.
 
     sim_name = String that specifies the simulation name eg. Halo1459_DMO
     occupation_fraction = String, one of edge1,nadler20,edge1_rt - for darklight (specifies prob of having stars at each halo mass)
-    fmb_percentage = value of f_tag or free parameter 
-    mergers = boolean specifying whether to tag accreting halos 
+    fmb_percentage = value of f_tag or free parameter
+    mergers = boolean specifying whether to tag accreting halos
     machine = string, one of Astro or Dirac
-    
-    '''  
+
+    '''
+    pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
     print(sim_name)
 

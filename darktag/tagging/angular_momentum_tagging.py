@@ -1,34 +1,21 @@
 
 import os
-import pynbody
-import tangos
+import sys
+import gc
+import random
+
 import numpy as np
 from numpy import sqrt
+import pandas as pd
 
-import gc
-
-from os import listdir
-from os.path import *
-import sys
-
-import numpy as np 
-import pandas as pd 
-
-from darklight import DarkLight
-
-import tangos
-
-
-from darktag.tagging.utils import *
-
-from tangos.examples.mergers import * 
-
-from ...config import config 
-
-from numpy import sqrt
-import random
 import pynbody
+import tangos
+from darklight import DarkLight
+from os.path import join
+from tangos.examples.mergers import get_mergers_of_major_progenitor
+
 from .utils import *
+from ...config import config
 
 def rank_order_particles_by_angmom(particles):
     

@@ -9,19 +9,21 @@
 
 import csv
 import os
-import pynbody
-import tangos
+import sys
+import gc
+import random
+
 import numpy as np
 from numpy import sqrt
-from darklight import DarkLight
-import darklight 
-from os import listdir
-from os.path import *
-import gc
-from tangos.examples.mergers import *     
-import random
-import sys
 import pandas as pd
+
+import pynbody
+import tangos
+from darklight import DarkLight
+from os import listdir
+from os.path import join, isdir
+from tangos.examples.mergers import get_mergers_of_major_progenitor
+
 from ..tagging.spatial_tagging import *
 from ..tagging.utils import *
 from ...config import config
@@ -608,7 +610,7 @@ def spatial_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = F
                     stored_reff_acc = np.append(stored_reff_acc,effective_radius_acc)
                     stored_reff = np.append(stored_reff,np.nan)
                     stored_reff_z = np.append(stored_reff_z,red_all[i])
-                    stored_time = np.append(stored_time, time_all[i])
+                    stored_time = np.append(stored_time, t_all[i])
                     stored_reff_tot = np.append(stored_reff_tot,effective_radius_acc)
                     kravtsov = hDMO['r200c']*0.02
                     kravtsov_r = np.append(kravtsov_r,kravtsov)
@@ -620,7 +622,7 @@ def spatial_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = F
                     stored_reff = np.append(stored_reff,effective_radius_insitu)
                     stored_reff_acc = np.append(stored_reff_acc,np.nan)
                     stored_reff_z = np.append(stored_reff_z,red_all[i])
-                    stored_time = np.append(stored_time, time_all[i])
+                    stored_time = np.append(stored_time, t_all[i])
                     stored_reff_tot = np.append(stored_reff_tot, effective_radius_insitu)
                     kravtsov = hDMO['r200c']*0.02
                     kravtsov_r = np.append(kravtsov_r,kravtsov)
@@ -638,7 +640,7 @@ def spatial_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = F
                 
                 stored_reff_tot = np.append(stored_reff_tot,effective_tot)
                 stored_reff_z = np.append(stored_reff_z,red_all[i])
-                stored_time = np.append(stored_time, time_all[i])
+                stored_time = np.append(stored_time, t_all[i])
 
                 kravtsov = hDMO['r200c']*0.02
                 kravtsov_r = np.append(kravtsov_r,kravtsov)

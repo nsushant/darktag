@@ -6,7 +6,6 @@ import pandas as pd
 import numpy as np
 import darklight 
 import matplotlib.pyplot as plt
-import sys
 import tangos
 import os
 import matplotlib.style
@@ -14,7 +13,10 @@ import matplotlib as mpl
 import seaborn as sns
 from ..tagging.utils import *
 from .calculate import *
-import edge_tangos_properties as etp
+try:
+    import edge_tangos_properties as etp
+except ImportError:
+    etp = None
 from ...config import config 
 
 #mpl.rcParams.update({'text.usetex': False})
