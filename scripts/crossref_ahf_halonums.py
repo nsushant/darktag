@@ -207,11 +207,9 @@ def main():
         print(f'  Clustering: no cluster found, using all {len(prev_iords)} particles')
 
     del s
-    s = pynbody.load(pjoin(pynbody_path, outputs[-1]))
-    s.physical_units()
-
+ 
     pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-    cat = s.halos(halo_numbers='v1')
+    cat = s.halos(halo_number='v1')
 
     best_ahf, overlap, mass = mass_filtered_search(
         cat, prev_iords, max_ahf,

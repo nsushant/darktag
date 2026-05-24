@@ -1,0 +1,18 @@
+
+def mutual(halo, IDs):
+    setA = set(halo.st['iord'])
+    setB = set(IDs)
+
+    if len(setA | setB) > 0:
+        return len(setA & setB)/len(setA | setB)
+    else:
+        return 0.0
+
+
+
+
+s = pynbody.load()
+
+# z = 0 
+
+s.halos()
