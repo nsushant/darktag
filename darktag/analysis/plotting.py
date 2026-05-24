@@ -259,7 +259,7 @@ def edge_plot_tagged_vs_hydro_mass_dist(name_of_DMO_simulation, name_of_HYDRO_si
 
         plt.title(str(name_of_HYDRO_simulation))
       
-        plt.ylabel("$M_{star}(<r)$ in $M_{\odot}$")
+        plt.ylabel(r"$M_{star}(<r)$ in $M_{\odot}$")
         plt.xlabel('Radial Distance in kpc')
 
     if plot_type == '1D Luminosity Distribution':
@@ -288,7 +288,7 @@ def edge_plot_tagged_vs_hydro_mass_dist(name_of_DMO_simulation, name_of_HYDRO_si
         plt.plot(r_sb_bins_hydro*(10**(-3)),sb_hydro,label='HYDRO')
         
         plt.xlabel('Radial Distance kpc')
-        plt.ylabel('Surface Brightness $L_{\odot}/pc^{2}$')
+        plt.ylabel(r'Surface Brightness $L_{\odot}/pc^{2}$')
     
     if plot_type == '2D SB profile obs units':
 
@@ -314,7 +314,7 @@ def edge_plot_tagged_vs_hydro_mass_dist(name_of_DMO_simulation, name_of_HYDRO_si
 
       plt.title(str(name_of_HYDRO_simulation))
       
-      plt.ylabel('Stellar np. in $M_{\odot}$')
+      plt.ylabel(r'Stellar np. in $M_{\odot}$')
       plt.xlabel('Radial Distance in Kpc')
 
     if plot_type == '1D Density Distribution':
@@ -339,7 +339,7 @@ def edge_plot_tagged_vs_hydro_mass_dist(name_of_DMO_simulation, name_of_HYDRO_si
 
       plt.title(str(name_of_HYDRO_simulation))
 
-      plt.ylabel('Density ($M_{\odot} kpc^{-3}$)')
+      plt.ylabel(r'Density ($M_{\odot} kpc^{-3}$)')
       plt.xlabel('Radial Distance in Kpc')
       plt.legend()
     if plot_type == '1D Ages Hist':
@@ -495,7 +495,7 @@ def plot_tagged_vs_hydro_mass_dist(DMO_halo_particles, HYDRO_halo_particles, fil
 
       plt.title(str(name_of_HYDRO_simulation)+"t = "+str(time_to_plot))
       
-      plt.ylabel(' $M_{star}(<r)$ in $M_{\odot}$')
+      plt.ylabel(r' $M_{star}(<r)$ in $M_{\odot}$')
       plt.xlabel('Radial Distance in Kpc')
 
     if plot_type == '1D Mass Distribution':
@@ -508,7 +508,7 @@ def plot_tagged_vs_hydro_mass_dist(DMO_halo_particles, HYDRO_halo_particles, fil
 
       plt.title(str(name_of_HYDRO_simulation)+"t = "+str(time_to_plot))
       
-      plt.ylabel('Stellar Mass in $M_{\odot}$')
+      plt.ylabel(r'Stellar Mass in $M_{\odot}$')
       plt.xlabel('Radial Distance in Kpc')
     
     return 
