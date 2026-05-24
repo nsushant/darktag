@@ -29,7 +29,9 @@
       "min_cluster_size": 10,
       "min_samples": null,
       "cluster_selection_epsilon": 0.0,
-      "cluster_selection_method": "eom"
+      "cluster_selection_method": "eom",
+      "allow_single_cluster": true,
+      "max_cluster_size": null
     },
 
     "darklight":{

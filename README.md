@@ -31,7 +31,6 @@ A Python package for assigning stellar mass to dark matter particles in dark mat
 
 ```bash
 pip install darktag
-pip install 'darktag[hdbscan]'    # optional: HDBSCAN clustering
 pip install darklight @ git+https://github.com/stacykim/darklight.git@main#egg=darklight
 ```
 
@@ -95,6 +94,8 @@ Set paths and parameters in `config.json` at the package root:
 | `hdbscan.min_samples` | HDBSCAN conservativeness (`null` = same as min_cluster_size) |
 | `hdbscan.cluster_selection_epsilon` | Max merge distance for HDBSCAN (0.0 = pure hierarchical) |
 | `hdbscan.cluster_selection_method` | `"eom"` (balanced) or `"leaf"` (fine-grained) |
+| `hdbscan.allow_single_cluster` | Allow all particles in one cluster (`true`/`false`) |
+| `hdbscan.max_cluster_size` | Max points per cluster (`null` = no limit) |
 | `darklight.n` | Number of darklight Monte Carlo realizations (default: 500) |
 | `darklight.DMO_OR_HYDRO` | `"DMO"` or `"HYDRO"` |
 | `darklight.poccupied` | Occupation regime: `"all"`, `"nadler20"`, `"edge1"`, `"edgert"` |

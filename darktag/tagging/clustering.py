@@ -6,15 +6,8 @@ particle clusters in phase space.
 """
 
 import numpy as np
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, HDBSCAN
 from collections import Counter
-
-_HDBSCAN_AVAILABLE = False
-try:
-    import hdbscan
-    _HDBSCAN_AVAILABLE = True
-except ImportError:
-    pass
 
 
 def _extract_features(particles, feature_cols):
@@ -70,6 +63,8 @@ def cluster_tagged_particles(
     hdbscan_min_samples=None,
     cluster_selection_epsilon=0.0,
     cluster_selection_method='eom',
+    allow_single_cluster=True,
+    max_cluster_size=None,
 ):
     if feature_cols is None:
         feature_cols = ['x', 'y']
@@ -92,16 +87,15 @@ def cluster_tagged_particles(
         clusterer = DBSCAN(eps=eps, min_samples=dbscan_min_samples)
         labels = clusterer.fit_predict(features_scaled, sample_weight=sample_weight)
     elif method == 'hdbscan':
-        if not _HDBSCAN_AVAILABLE:
-            raise ImportError(
-                "hdbscan is not installed. Install with: pip install hdbscan"
-            )
-        clusterer = hdbscan.HDBSCAN(
+        clusterer = HDBSCAN(
             min_cluster_size=min_cluster_size,
             min_samples=hdbscan_min_samples,
             cluster_selection_epsilon=cluster_selection_epsilon,
             cluster_selection_method=cluster_selection_method,
             metric='euclidean',
+            allow_single_cluster=allow_single_cluster,
+            max_cluster_size=max_cluster_size,
+            copy=False,
         )
         labels = clusterer.fit_predict(features_scaled)
     else:

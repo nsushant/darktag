@@ -35,10 +35,6 @@ dependencies = [
 ]
 
 
-[project.optional-dependencies]
-hdbscan = ["hdbscan>=0.8.33"]
-
-
 keywords = ["astronomy", "astrophysics", "particle-tagging", "dark-matter", "simulations", "stellar-mass"]
 
 [project.urls]

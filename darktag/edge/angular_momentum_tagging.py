@@ -405,6 +405,8 @@ def angmom_calculate_reffs(sim_name, particles_tagged,reffs_fname,from_file = Fa
             hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
             cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
             cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+            allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+            max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
         )
 
         if best_label == -1:

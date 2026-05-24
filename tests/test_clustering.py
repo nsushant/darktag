@@ -3,7 +3,6 @@ from darktag.darktag.tagging.clustering import (
     _extract_features,
     _select_best_label,
     cluster_tagged_particles,
-    _HDBSCAN_AVAILABLE,
 )
 
 
@@ -117,9 +116,6 @@ class TestClusterTaggedParticles:
         assert cluster_size >= 50
 
     def test_hdbscan_2d(self):
-        if not _HDBSCAN_AVAILABLE:
-            import pytest
-            pytest.skip("hdbscan not installed")
         x1, y1 = self._make_blob(50, (0.0, 0.0))
         x2, y2 = self._make_blob(20, (5.0, 5.0))
         particles = {
@@ -182,9 +178,6 @@ class TestClusterTaggedParticles:
         assert best_label != -1
 
     def test_hdbscan_with_scaling(self):
-        if not _HDBSCAN_AVAILABLE:
-            import pytest
-            pytest.skip("hdbscan not installed")
         x = np.random.RandomState(42).normal(0, 0.1, 30)
         y = np.random.RandomState(42).normal(0, 0.1, 30)
         particles = {'x': x, 'y': y, 'iord': np.arange(30)}
@@ -199,19 +192,6 @@ class TestClusterTaggedParticles:
         particles = {'x': np.array([1.0, 2.0, 3.0]), 'y': np.array([4.0, 5.0, 6.0]), 'iord': np.arange(3)}
         with pytest.raises(ValueError, match='Unknown'):
             cluster_tagged_particles(particles, method='kmeans')
-
-    def test_missing_hdbscan(self):
-        import pytest
-        particles = {'x': np.array([1.0, 2.0, 3.0]), 'y': np.array([4.0, 5.0, 6.0]), 'iord': np.arange(3)}
-
-        import darktag.darktag.tagging.clustering as cl
-        orig = cl._HDBSCAN_AVAILABLE
-        cl._HDBSCAN_AVAILABLE = False
-        try:
-            with pytest.raises(ImportError, match='hdbscan is not installed'):
-                cluster_tagged_particles(particles, method='hdbscan')
-        finally:
-            cl._HDBSCAN_AVAILABLE = orig
 
     def test_sample_weight_dbscan(self):
         x = np.random.RandomState(42).normal(0, 0.1, 30)
