@@ -52,7 +52,7 @@ def check_ahf_halo_mass(args):
             if total_mass < expected_m200 * mass_tol or total_mass > expected_m200 / mass_tol:
                 return key, 0, total_mass
         iords = h.dm['iord']
-        overlap = len(np.intersect1d(iords, prev_iords, assume_unique=True))
+        overlap = np.isin(iords, prev_iords).sum()
         return key, overlap, total_mass
     except Exception:
         return key, 0, 0
