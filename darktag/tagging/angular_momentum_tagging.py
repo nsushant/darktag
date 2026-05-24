@@ -212,7 +212,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, pa
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        msn = float(np.mean(mstar_s_insitu[idrz]))              
 
         # msp = previous snap's darklight calculated stellar mass 
         if msn != 0:
@@ -223,7 +223,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, pa
                 
             # else msp = previous snap's mstar value
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue
@@ -620,7 +620,7 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        msn = float(np.mean(mstar_s_insitu[idrz]))              
         
         print("msn:",msn)
 
@@ -632,7 +632,7 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
                 msp = 0
                 
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue

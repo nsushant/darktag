@@ -237,7 +237,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, py
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        msn = float(np.mean(mstar_s_insitu[idrz]))              
 
         # msp = previous snap's darklight calculated stellar mass 
         if msn != 0:
@@ -248,7 +248,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, py
                 
             # else msp = previous snap's mstar value
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue
@@ -693,18 +693,19 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
         # index of previous snap's mstar value in darklight array
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
-        # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        # current snap's darklight calculated stellar mass
+        # mean over scatter realisations in case DarkLight returns a 2D array
+        msn = float(np.mean(mstar_s_insitu[idrz]))
 
-        # msp = previous snap's darklight calculated stellar mass 
+        # msp = previous snap's darklight calculated stellar mass
         if msn != 0:
-            # if there wasn't a previous snap idrz_previous==None and msp = 0 
-            
+            # if there wasn't a previous snap idrz_previous==None and msp = 0
+
             if idrz_previous==None:
                 msp = 0
-                
+
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue

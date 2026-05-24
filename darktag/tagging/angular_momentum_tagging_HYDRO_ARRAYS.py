@@ -365,7 +365,7 @@ tangos.core.init_db(join(config.get_path("tangos_path"),str(haloname)+".db"))
         #idrz_previous = np.where(t == t_all[i-1])[0][0] if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        msn = float(np.mean(mstar_s_insitu[idrz]))              
         
         
         if len(mstar_s_insitu) != len(t):
@@ -381,7 +381,7 @@ tangos.core.init_db(join(config.get_path("tangos_path"),str(haloname)+".db"))
                 
             # else msp = previous snap's mstar value
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue
@@ -858,7 +858,7 @@ def angmom_tag_over_full_sim_recursive(DMOname,HYDROname, halonumber,tstep, sims
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = mstar_s_insitu[idrz]              
+        msn = float(np.mean(mstar_s_insitu[idrz]))              
 
         # msp = previous snap's darklight calculated stellar mass 
         if msn != 0:
@@ -868,7 +868,7 @@ def angmom_tag_over_full_sim_recursive(DMOname,HYDROname, halonumber,tstep, sims
                 msp = 0
                 
             elif idrz_previous >= 0:
-                msp = mstar_s_insitu[idrz_previous]
+                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue
