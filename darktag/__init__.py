@@ -7,23 +7,14 @@ in dark matter-only simulations using advanced particle tagging methods.
 
 __version__ = "1.0.0"
 
-# Try to import optional dependencies
+import warnings
+
 try:
     from .analysis import *
-except ImportError as e:
-    msg = str(e)
-    if any(dep in msg for dep in ["pynbody", "tangos", "darklight", "darktag.tagging", "darktag.analysis"]):
-        print("Warning: Analysis module requires astrophysics dependencies.")
-        print("Install with: pip install darktag[astrophysics]")
-    else:
-        raise
+except ImportError:
+    warnings.warn("Analysis module could not be loaded (missing astrophysics dependencies)")
 
 try:
     from .tagging import *
-except ImportError as e:
-    msg = str(e)
-    if any(dep in msg for dep in ["pynbody", "tangos", "darklight", "darktag.tagging", "darktag.analysis"]):
-        print("Warning: Tagging module requires astrophysics dependencies.")
-        print("Install with: pip install darktag[astrophysics]")
-    else:
-        raise
+except ImportError:
+    warnings.warn("Tagging module could not be loaded (missing astrophysics dependencies)")
