@@ -14,9 +14,15 @@ import multiprocessing as mp
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import importlib.util
 
-from config import config
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+sys.path.insert(0, _REPO_ROOT)
+
+_spec = importlib.util.spec_from_file_location('darktag_config', os.path.join(_REPO_ROOT, 'config.py'))
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+config = _mod.config
 from darktag.tagging.clustering import cluster_tagged_particles
 
 
