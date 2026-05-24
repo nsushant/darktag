@@ -14,8 +14,8 @@ import multiprocessing as mp
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
 sys.path.insert(0, os.path.expanduser('~'))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')))
 
 from darktag.config import config
 from darktag.tagging.clustering import cluster_tagged_particles

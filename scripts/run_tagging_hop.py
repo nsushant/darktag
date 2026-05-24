@@ -9,13 +9,13 @@ import sys
 import os
 from os.path import join as pjoin
 
-# Allow running without pip install by adding the repo root to sys.path.
-# Has no effect if darktag is already installed in the active environment.
-sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..')))
-
 # darklight is not on PyPI — it is expected to be cloned into ~ or installed
 # separately. See INSTALL.md.
 sys.path.insert(0, os.path.expanduser('~'))
+
+# Allow running without pip install. Inserted last so it takes priority
+# over ~ and ensures the inner darktag package is found first.
+sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..')))
 
 from darktag.config import config
 from darktag.tagging.angular_momentum_tagging_hydrodynamic_sim import angmom_tag_over_full_sim_recursive
