@@ -22,8 +22,8 @@ from tangos.examples.mergers import *
 import random
 import sys
 import pandas as pd
-from darktag.tagging.spatial_tagging import *
-from darktag.tagging.utils import *
+from ..tagging.spatial_tagging import *
+from ..tagging.utils import *
 from ...config import config
 
 

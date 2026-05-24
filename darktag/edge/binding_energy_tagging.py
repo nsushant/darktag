@@ -25,9 +25,9 @@ from tangos.examples.mergers import *
 import random
 import sys
 import pandas as pd
-import darktag.tagging.binding_energy_tagging as dtag
-from darktag.tagging.utils import *
-from darktag.analysis.calculate import *
+from ..tagging import binding_energy_tagging as dtag
+from ..tagging.utils import *
+from ..analysis.calculate import *
 from ...config import config
 
 

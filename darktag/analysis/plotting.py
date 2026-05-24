@@ -12,8 +12,8 @@ import os
 import matplotlib.style
 import matplotlib as mpl
 import seaborn as sns
-from darktag.tagging.utils import *
-from darktag.analysis.calculate import *
+from ..tagging.utils import *
+from .calculate import *
 import edge_tangos_properties as etp
 from ...config import config 
 
