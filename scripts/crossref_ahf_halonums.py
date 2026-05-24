@@ -108,6 +108,8 @@ def main():
                         help='Fraction of R200 for clustering (default: 0.05)')
     parser.add_argument('--cluster-max-particles', type=int, default=10000,
                         help='Max particles for clustering (random downsample if exceeded, default: 10000)')
+    parser.add_argument('--eps', type=float, default=None,
+                        help='DBSCAN eps (overrides config, scaled features)')
     args = parser.parse_args()
 
     sim_name = args.sim_name
@@ -115,6 +117,7 @@ def main():
     mass_tol = args.mass_tol
     r200_frac = args.r200_fraction
     cluster_max_particles = args.cluster_max_particles
+    eps_override = args.eps
     parallel = args.parallel
     num_workers = args.num_workers or mp.cpu_count()
 
@@ -140,7 +143,7 @@ def main():
     cluster_kwargs = dict(
         method=cluster_config.get('method', 'hdbscan'),
         feature_cols=cluster_config.get('features', ['x', 'y']),
-        scale=cluster_config.get('scale', False),
+        scale=True,
     )
     if cluster_kwargs['method'] == 'hdbscan':
         cluster_kwargs.update(dict(
@@ -153,7 +156,7 @@ def main():
         ))
     elif cluster_kwargs['method'] == 'dbscan':
         cluster_kwargs.update(dict(
-            eps=config.get_with_default('dbscan', 'eps', 0.05),
+            eps=eps_override if eps_override is not None else config.get_with_default('dbscan', 'eps', 0.05),
             dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
         ))
 
@@ -203,8 +206,7 @@ def main():
         prev_iords = np.asarray(dm_all['iord'])
         print(f'  Clustering: no cluster found, using all {len(prev_iords)} particles')
 
-    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-    cat = s.halos(halo_numbers='v1')
+    cat = pynbody.halo.ahf.AHFCatalogue(s, halo_numbers='v1')
 
     best_ahf, overlap, mass = mass_filtered_search(
         cat, prev_iords, max_ahf,
@@ -234,8 +236,7 @@ def main():
             print(f'  Could not load ({e}), skipping')
             continue
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-        cat = s.halos(halo_numbers='v1')
+        cat = pynbody.halo.ahf.AHFCatalogue(s, halo_numbers='v1')
 
         best_ahf, overlap, mass = mass_filtered_search(
             cat, prev_iords, max_ahf,
