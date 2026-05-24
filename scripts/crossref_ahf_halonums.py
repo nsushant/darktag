@@ -154,7 +154,7 @@ def main():
     elif cluster_kwargs['method'] == 'dbscan':
         cluster_kwargs.update(dict(
             eps=config.get_with_default('dbscan', 'eps', 0.05),
-            min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+            dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
         ))
 
     results = []
