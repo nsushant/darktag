@@ -288,7 +288,7 @@ def BE_tag_over_full_sim(DMOsim,halonumber ,free_param_value = 0.01, PE_file=Non
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = float(np.mean(mstar_s_insitu[idrz]))              
+        msn = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz]))              
 
         # msp = previous snap's darklight calculated stellar mass 
         if msn != 0:
@@ -299,7 +299,7 @@ def BE_tag_over_full_sim(DMOsim,halonumber ,free_param_value = 0.01, PE_file=Non
                 
             # else msp = previous snap's mstar value
             elif idrz_previous >= 0:
-                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
+                msp = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz_previous] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue
@@ -719,7 +719,7 @@ def BE_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_value = 
         idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
         # current snap's darklight calculated stellar mass 
-        msn = float(np.mean(mstar_s_insitu[idrz]))              
+        msn = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz]))              
 
         # msp = previous snap's darklight calculated stellar mass 
         if msn != 0:
@@ -730,7 +730,7 @@ def BE_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_value = 
                 
             # else msp = previous snap's mstar value
             elif idrz_previous >= 0:
-                msp = float(np.mean(mstar_s_insitu[idrz_previous]))
+                msp = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz_previous] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz_previous]))
         else:
             print('There is no stellar mass at current timestep')
             continue

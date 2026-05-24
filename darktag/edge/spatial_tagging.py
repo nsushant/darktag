@@ -209,7 +209,7 @@ def spatial_tag_particles(sim_name_input,occupation_fraction,filename_for_run,me
             # index of previous snap's mstar value in darklight array
             idrz_previous = np.argmin(abs(t - t_all[i-1])) if idrz>0 else None 
 
-            msn = float(np.mean(mstar_s_insitu[idrz]))
+            msn = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz]))
 
             #get the index at which the redshift of the snapshot is stored in the DarkLight array
         
@@ -217,7 +217,7 @@ def spatial_tag_particles(sim_name_input,occupation_fraction,filename_for_run,me
                 if idrz_previous==None:
                     msp = 0
                 elif idrz_previous >= 0:
-                    msp = float(np.mean(mstar_s_insitu[idrz_previous]))
+                    msp = float(np.mean(np.asarray(mstar_s_insitu)[:, idrz_previous] if np.asarray(mstar_s_insitu).ndim == 2 else np.asarray(mstar_s_insitu)[idrz_previous]))
             else:
                 print('There is no stellar mass at current timestep')
                 continue
