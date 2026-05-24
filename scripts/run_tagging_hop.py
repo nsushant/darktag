@@ -10,6 +10,7 @@ import os
 from os.path import join as pjoin
 
 sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.expanduser('~'))
 
 from config import config
 from darktag.tagging.angular_momentum_tagging_hydrodynamic_sim import angmom_tag_over_full_sim_recursive
