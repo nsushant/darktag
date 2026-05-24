@@ -172,7 +172,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, py
     outputs.sort()
 
     # Get stellar masses at each redshift using darklight for insitu tagging (mergers = False excludes accreted mass)
-    t,redshift,vsmooth,sfh_insitu,mstar_s_insitu,mstar_total =DarkLight(main_halo,nscatter=0,vthres=26.3,zre=4.,pre_method='fiducial',post_method='schechter',post_scatter_method='increasing',binning='3bins',timesteps='sim',mergers=True,DMO=True,occupation=2.5e7,fn_vmax=None)
+    t,redshift,vsmooth,sfh_insitu,mstar_s_insitu,mstar_total = DarkLight(main_halo, DMO=True, mergers=True, n=config.get("darklight", "n"))
 
     #calculate when the mergers took place and grab all the tangos halo objects involved in the merger (zmerge = merger redshift, hmerge = merging halo objects,qmerge = merger ratio)
     zmerge, qmerge, hmerge = get_mergers_of_major_progenitor(main_halo)
@@ -406,7 +406,7 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, py
 
                 
                 try:
-                    t_2,redshift_2,vsmooth_2,sfh_in2,mstar_in2,mstar_merging = DarkLight(hDM,nscatter=0,vthres=26.3,zre=4.,pre_method='fiducial',post_method='schechter',post_scatter_method='increasing',binning='3bins',timesteps='sim',mergers=True,DMO=False,occupation=2.5e7,fn_vmax=None)
+                    t_2,redshift_2,vsmooth_2,sfh_in2,mstar_in2,mstar_merging = DarkLight(hDM, DMO=False, mergers=True, n=config.get("darklight", "n"))
                     
 
                     
@@ -594,7 +594,7 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
     # Get stellar masses at each redshift using darklight for insitu tagging (mergers = False, excludes accreted mass)
     
     if mode == "darklight":
-        t,redshift,vsmooth,sfh_insitu,mstar_s_insitu,mstar_total = DarkLight(main_halo,nscatter=0,vthres=26.3,zre=4.,pre_method='fiducial',post_method='schechter',post_scatter_method='increasing',binning='3bins',timesteps='sim',mergers=False,DMO=False,occupation=2.5e7,fn_vmax=None)
+        t,redshift,vsmooth,sfh_insitu,mstar_s_insitu,mstar_total = DarkLight(main_halo, DMO=False, mergers=False, n=config.get("darklight", "n"))
 
     else: 
         mstar_s_insitu,t = integrate_sfr(main_halo["SFR_histogram"],t_all[-1])
@@ -858,7 +858,7 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
                     continue
                 try:
                     if mode == 'darklight':
-                        t_2,redshift_2,vsmooth_2,sfh_in2,mstar_in2,mstar_merging = DarkLight(hDM,nscatter=0,vthres=26.3,zre=4.,pre_method='fiducial',post_method='schechter',post_scatter_method='increasing',binning='3bins',timesteps='sim',mergers=True,DMO=False,occupation=2.5e7,fn_vmax=None)
+                        t_2,redshift_2,vsmooth_2,sfh_in2,mstar_in2,mstar_merging = DarkLight(hDM, DMO=False, mergers=True, n=config.get("darklight", "n"))
                     
                     else:
                         t_2= hDM.calculate_for_progenitors("t()")[0][::-1]                                                                                 
