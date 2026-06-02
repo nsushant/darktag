@@ -226,8 +226,8 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
         try:  DMOparticles = pynbody.load(simfn)
 
         # where this data isn't available, notify the user.
-        except:
-            print('--> DMO particle data exists but failed to read it, skipping!')
+        except Exception as e:
+            print(f'--> DMO particle data exists but failed to read it, skipping! Error: {e}')
             continue
         
         # once the data from the snapshot has been loaded, .physical_units()
@@ -485,8 +485,8 @@ def calculate_reffs_over_full_sim(DMOsim, data_particles_tagged, pynbody_path  =
         try:  DMOparticles = pynbody.load(simfn)
 
         # where this data isn't available, notify the user.
-        except:
-            print('--> DMO particle data exists but failed to read it, skipping!')
+        except Exception as e:
+            print(f'--> DMO particle data exists but failed to read it, skipping! Error: {e}')
             continue
         
         # once the data from the snapshot has been loaded, .physical_units()
