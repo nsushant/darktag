@@ -2,6 +2,7 @@ from .spatial_tagging import *
 from .angular_momentum_tagging import *
 from ..config import config
 from .clustering import cluster_tagged_particles
+from ..analysis.calculate import calc_3D_cm
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
 
