@@ -23,6 +23,8 @@ def main():
     parser.add_argument('sim_name', help='Tangos simulation name (e.g. Halo1459_DMO)')
     parser.add_argument('--halonumber', type=int, default=1,
                         help='Halo number (default: 1)')
+    parser.add_argument('--no-clustering', action='store_true', default=False,
+                        help='Disable DBSCAN clustering when calculating reffs')
     args = parser.parse_args()
 
     sim_name = args.sim_name
@@ -46,6 +48,7 @@ def main():
         pynbody_path=pynbody_path,
         halo_number=args.halonumber,
         reffs_fname=reffs_fname,
+        use_clustering=not args.no_clustering,
     )
 
     print(f'\nSaved: {reffs_fname}')

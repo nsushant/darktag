@@ -80,7 +80,7 @@ def tag_particles(DMO_database, path_to_particle_data = None, tagging_method = '
 
 
 
-def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0, reffs_fname='reffs.csv'):
+def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0, reffs_fname='reffs.csv', use_clustering=True):
     
     # Use config path if pynbody_path not provided
     if pynbody_path is None:
@@ -303,7 +303,7 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
         
         particles_only_insitu = DMOparticles[np.isin(DMOparticles['iord'],selected_iords_insitu_only)] if len(selected_iords_insitu_only) > 0 else []
         
-        if len(particle_selection_reff_tot) > 0:
+        if use_clustering and len(particle_selection_reff_tot) > 0:
             clustering_cfg = config.get('tagging', 'clustering')
             masses_for_clustering = np.array([
                 data_grouped.loc[iord]['mstar']
@@ -412,6 +412,7 @@ def calculate_reffs_multi_instance(
     halo_number=0,
     output_dir=None,
     save_to_file=True,
+    use_clustering=True,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -584,28 +585,28 @@ def calculate_reffs_multi_instance(
                 continue
 
             # DBSCAN with this instance's own PrevBGMMIords
-            masses_for_clustering_k = np.array([data_grouped_k.loc[iord]['mstar'] for iord in particle_sel_k['iord']])
-            labels, best_label, _ = cluster_tagged_particles(
-                particles=particle_sel_k,
-                prev_iords=PrevBGMMIords[k] if len(PrevBGMMIords[k]) > 0 else None,
-                method=clustering_cfg.get('method', 'dbscan'),
-                feature_cols=clustering_cfg.get('features', ['x', 'y']),
-                scale=clustering_cfg.get('scale', False),
-                sample_weight=masses_for_clustering_k,
-                eps=config.get_with_default('dbscan', 'eps', 0.05),
-                dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
-                min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
-                hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
-                cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
-                cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
-                allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
-                max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
-            )
-            if best_label == -1:
-                continue
-
-            particle_sel_k = particle_sel_k[np.where(labels == best_label)]
-            PrevBGMMIords[k] = np.asarray(particle_sel_k['iord'])
+            if use_clustering:
+                masses_for_clustering_k = np.array([data_grouped_k.loc[iord]['mstar'] for iord in particle_sel_k['iord']])
+                labels, best_label, _ = cluster_tagged_particles(
+                    particles=particle_sel_k,
+                    prev_iords=PrevBGMMIords[k] if len(PrevBGMMIords[k]) > 0 else None,
+                    method=clustering_cfg.get('method', 'dbscan'),
+                    feature_cols=clustering_cfg.get('features', ['x', 'y']),
+                    scale=clustering_cfg.get('scale', False),
+                    sample_weight=masses_for_clustering_k,
+                    eps=config.get_with_default('dbscan', 'eps', 0.05),
+                    dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+                    min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+                    hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+                    cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+                    cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+                    allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+                    max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+                )
+                if best_label == -1:
+                    continue
+                particle_sel_k = particle_sel_k[np.where(labels == best_label)]
+                PrevBGMMIords[k] = np.asarray(particle_sel_k['iord'])
 
             masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 

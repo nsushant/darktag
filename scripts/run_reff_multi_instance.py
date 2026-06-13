@@ -31,6 +31,8 @@ def main():
                         help='Halo number (default: 0)')
     parser.add_argument('--output-dir', type=str, default=None,
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
+    parser.add_argument('--no-clustering', action='store_true', default=False,
+                        help='Disable DBSCAN clustering when calculating reffs')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
@@ -51,6 +53,7 @@ def main():
         pynbody_path=pynbody_path,
         halo_number=args.halonumber,
         output_dir=args.output_dir,
+        use_clustering=not args.no_clustering,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'
