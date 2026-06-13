@@ -486,6 +486,265 @@ def angmom_tag_over_full_sim(DMOsim, halonumber = 1 ,free_param_value = 0.01, pa
     return df_tagged_particles
 
 
+def angmom_tag_multi_instance(
+    DMOsim,
+    n_instances,
+    halonumber=1,
+    free_param_value=0.01,
+    output_prefix=None,
+    mergers=True,
+    AHF_centers_file=None,
+    occupation_frac='all',
+):
+    '''
+    Runs n_instances independent DarkLight realisations over the full simulation,
+    loading each snapshot ONCE and writing one output CSV per instance.
+
+    Inputs:
+
+    DMOsim           - tangos simulation object
+    n_instances      - number of independent DarkLight realisations to run
+    halonumber       - halo number (default 1)
+    free_param_value - tagging fraction (default 0.01)
+    output_prefix    - prefix for output filenames; defaults to "{sim_name}_tagged"
+    mergers          - whether to include accreting/merging halos (default True)
+    AHF_centers_file - path to AHF centering CSV (optional)
+    occupation_frac  - occupation fraction regime: 'all', 'nadler20', 'edge1', 'edgert'
+
+    Returns:
+
+    list of output CSV filenames (length n_instances)
+    Each CSV has columns: iords, mstar, t, z, type
+    '''
+
+    DMOname = DMOsim.path
+
+    t_all, red_all, main_halo, halonums, outputs = load_indexing_data(DMOsim, halonumber)
+
+    # N independent DarkLight mass histories for the main halo — n=1 per call for genuine stochasticity
+    print(f'Running DarkLight {n_instances} time(s) for main halo...')
+    dl_histories = [
+        DarkLight(main_halo, DMO=True, n=1, mergers=False)
+        for _ in range(n_instances)
+    ]
+    # each entry: (t, redshift, vsmooth, sfh_insitu, mstar_s_insitu, mstar_total)
+
+    zmerge, qmerge, hmerge = get_mergers_of_major_progenitor(main_halo)
+    hmerge_added, z_set_vals = group_mergers(zmerge, hmerge)
+
+    if len(red_all) != len(outputs):
+        print('output array length does not match redshift and time arrays')
+
+    AHF_centers = pd.read_csv(config.get_path("manual_halonum_path")) if AHF_centers_file is not None else None
+
+    # Initialise N output files
+    if output_prefix is None:
+        output_prefix = DMOname + '_tagged'
+    os.makedirs(output_prefix, exist_ok=True)
+    filenames = [os.path.join(output_prefix, f"instance_{k:03d}.csv") for k in range(n_instances)]
+    _header = pd.DataFrame({'iords': [], 'mstar': [], 't': [], 'z': [], 'type': []})
+    for fn in filenames:
+        _header.to_csv(fn, mode='w', header=True)
+
+    def _mstar_at(mstar_arr, t_dl, t_target):
+        idx = np.argmin(abs(t_dl - t_target))
+        arr = np.asarray(mstar_arr)
+        return float(np.mean(arr[:, idx] if arr.ndim == 2 else arr[idx]))
+
+    # Main snapshot loop
+    for i in range(len(outputs)):
+        gc.collect()
+
+        print('Current snapshot -->', outputs[i])
+
+        hDMO = tangos.get_halo(DMOname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+        z_val = red_all[i]
+        t_val = t_all[i]
+
+        # Compute insitu mass_select for each instance (no I/O)
+        mass_selects_insitu = []
+        for k in range(n_instances):
+            t_dl, _, _, _, mstar_s_insitu_k, _ = dl_histories[k]
+            msn = _mstar_at(mstar_s_insitu_k, t_dl, t_val)
+            if msn == 0:
+                mass_selects_insitu.append(0)
+                continue
+            msp = _mstar_at(mstar_s_insitu_k, t_dl, t_all[i - 1]) if i > 0 else 0.0
+            mass_selects_insitu.append(int(msn - msp))
+
+        merger_snap = (
+            mergers
+            and (i + 1 < len(red_all))
+            and (red_all[i + 1] in z_set_vals)
+        )
+        need_snap = any(m > 0 for m in mass_selects_insitu) or merger_snap
+
+        if not need_snap:
+            print("Done with iteration", i)
+            continue
+
+        # Load snapshot ONCE
+        simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+        try:
+            print(simfn)
+            print('loading DMO particles')
+            DMOparticles = pynbody.load(simfn)
+            DMOparticles.physical_units()
+        except Exception as e:
+            print(e)
+            print('--> failed to load snapshot, skipping')
+            print("Done with iteration", i)
+            continue
+
+        # Insitu block
+        if any(m > 0 for m in mass_selects_insitu):
+            try:
+                hDMO['r200c']
+            except Exception:
+                print("Couldn't load R200 at timestep:", i)
+                del DMOparticles
+                print("Done with iteration", i)
+                continue
+
+            subhalo_iords = np.array([])
+
+            if AHF_centers_file is None:
+                h = DMOparticles.halos()[int(halonums[i]) - 1]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                AHF_crossref = AHF_centers[AHF_centers['snapshot'] == outputs[i]]['AHF halonum'].values[0]
+                h = DMOparticles.halos(halo_numbers="v1")[int(AHF_crossref)]
+                children_ahf_int = h.properties['children']
+                halo_catalogue = DMOparticles.halos(halo_numbers="v1")
+                for ch in children_ahf_int:
+                    if ch != AHF_crossref:
+                        subhalo_iords = np.append(subhalo_iords, halo_catalogue[int(ch)].dm['iord'])
+                h = h[np.logical_not(np.isin(h['iord'], subhalo_iords))] if len(subhalo_iords) > 0 else h
+
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+            pynbody.analysis.halo.center(h)
+
+            try:
+                r200c_pyn = pynbody.analysis.halo.virial_radius(h.d, overden=200, r_max=None, rho_def='critical')
+            except Exception:
+                print('could not calculate R200c')
+                del DMOparticles
+                print("Done with iteration", i)
+                continue
+
+            DMOparts_insitu = DMOparticles[
+                sqrt(DMOparticles['pos'][:, 0] ** 2
+                     + DMOparticles['pos'][:, 1] ** 2
+                     + DMOparticles['pos'][:, 2] ** 2) <= r200c_pyn
+            ]
+            DMOparts_insitu = DMOparts_insitu[
+                np.logical_not(np.isin(DMOparts_insitu['iord'], subhalo_iords))
+            ]
+
+            # Angular-momentum ranking ONCE per snap
+            parts_sorted_angmom = rank_order_particles_by_angmom(DMOparts_insitu)
+            del DMOparts_insitu
+
+            # Fan across N instances
+            if parts_sorted_angmom.shape[0] > 0:
+                for k in range(n_instances):
+                    if mass_selects_insitu[k] > 0:
+                        arr = assign_stars_to_particles(
+                            mass_selects_insitu[k], parts_sorted_angmom, float(free_param_value)
+                        )
+                        row = pd.DataFrame({
+                            'iords': arr[0],
+                            'mstar': arr[1],
+                            't': np.repeat(t_val, len(arr[0])),
+                            'z': np.repeat(z_val, len(arr[0])),
+                            'type': np.repeat('insitu', len(arr[0])),
+                        })
+                        row.to_csv(filenames[k], mode='a', header=False)
+
+        # Mergers block
+        if merger_snap:
+            t_id = int(np.where(z_set_vals == red_all[i + 1])[0][0])
+
+            for hDM in hmerge_added[t_id][0]:
+                gc.collect()
+                print('halo:', hDM)
+
+                if occupation_frac != 'all':
+                    try:
+                        prob_occupied = calculate_poccupied(hDM, 2.5e7)
+                    except Exception as e:
+                        print(e)
+                        print("poccupied couldn't be calculated")
+                        continue
+                else:
+                    prob_occupied = 1.0
+
+                # Halo centering and particle ranking done ONCE (deterministic given snap)
+                try:
+                    h_merge = DMOparticles.halos()[int(hDM.calculate('halo_number()')) - 1]
+                    pynbody.analysis.halo.center(h_merge.dm)
+                    r200c_pyn_acc = pynbody.analysis.halo.virial_radius(
+                        h_merge.d, overden=200, r_max=None, rho_def='critical'
+                    )
+                except Exception as ex:
+                    print('centering data unavailable, skipping', ex)
+                    continue
+
+                DMOparts_acc = DMOparticles[
+                    sqrt(DMOparticles['pos'][:, 0] ** 2
+                         + DMOparticles['pos'][:, 1] ** 2
+                         + DMOparticles['pos'][:, 2] ** 2) <= r200c_pyn_acc
+                ]
+
+                try:
+                    acc_sorted = rank_order_particles_by_angmom(DMOparts_acc)
+                except Exception:
+                    del DMOparts_acc
+                    continue
+                del DMOparts_acc
+
+                # Each instance gets its own DarkLight draw (n=1) and occupation check
+                for k in range(n_instances):
+                    if occupation_frac != 'all' and np.random.random() > prob_occupied:
+                        print('Skipped instance', k)
+                        continue
+
+                    try:
+                        _, _, _, _, _, mstar_merging_k = DarkLight(
+                            hDM, DMO=True, n=1, mergers=True
+                        )
+                        if len(mstar_merging_k) == 0:
+                            continue
+                    except Exception as e:
+                        print(e, '-- skipping instance', k)
+                        continue
+
+                    mass_merge_k = mstar_merging_k[-1]
+                    if int(mass_merge_k) < 1:
+                        continue
+
+                    arr = assign_stars_to_particles(
+                        int(mass_merge_k), acc_sorted, float(free_param_value)
+                    )
+                    row = pd.DataFrame({
+                        'iords': arr[0],
+                        'mstar': arr[1],
+                        't': np.repeat(t_val, len(arr[0])),
+                        'z': np.repeat(z_val, len(arr[0])),
+                        'type': np.repeat('accreted', len(arr[0])),
+                    })
+                    row.to_csv(filenames[k], mode='a', header=False)
+
+        del DMOparticles
+        print("Done with iteration", i)
+
+    print(f'\nFinished. Wrote {n_instances} output files:')
+    for fn in filenames:
+        print(' ', fn)
+
+    return filenames
+
+
 def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_value = 0.001,free_param_value_acc = None ,pynbody_path  = None, particle_storage_filename=None, AHF_centers_filepath=None, mergers = True, df_tagged_particles=None ,tag_typ='insitu',acc_halo_path_tagged=None,main_halo_paths=None):
 
     '''
@@ -958,11 +1217,352 @@ def angmom_tag_over_full_sim_recursive(DMOsim,tstep, halonumber, free_param_valu
     return df_tagged_particles,acc_halo_path_tagged
 
 
+def angmom_tag_multi_instance_recursive(
+    DMOsim,
+    n_instances,
+    tstep,
+    halonumber,
+    free_param_value=0.001,
+    free_param_value_acc=None,
+    pynbody_path=None,
+    output_prefix=None,
+    AHF_centers_filepath=None,
+    mergers=True,
+    dfs_tagged_particles=None,
+    tag_typ='insitu',
+    acc_halo_path_tagged=None,
+    main_halo_paths=None,
+    filenames=None,
+):
+    '''
+    Multi-instance variant of angmom_tag_over_full_sim_recursive.
+
+    Runs n_instances independent DarkLight realisations (each with n=1) over the
+    full simulation, loading each snapshot once and writing one output CSV per instance.
+
+    At the top level call, pass only DMOsim, n_instances, tstep, halonumber and any
+    optional kwargs.  filenames and dfs_tagged_particles are initialised internally and
+    threaded through recursive calls automatically.
+
+    Returns: (dfs_tagged_particles, acc_halo_path_tagged)
+        dfs_tagged_particles - list of N DataFrames (one per instance)
+        filenames are written incrementally to disk
+    '''
+
+    if free_param_value_acc is None:
+        free_param_value_acc = free_param_value
+
+    DMOname = DMOsim.path
+
+    t_all, red_all, main_halo, halonums, outputs = load_indexing_data(DMOsim, halonumber)
+
+    # N independent DarkLight histories for the main halo (n=1 each for genuine stochasticity)
+    print(f'Running DarkLight {n_instances} time(s) for halo {halonumber} (n=1 each)...')
+    dl_histories = [
+        DarkLight(main_halo, DMO=True, n=1, mergers=False)
+        for _ in range(n_instances)
+    ]
+    # Extract 1D mstar arrays — dl[4][0] mirrors the [0] indexing in the original
+    t_arrays     = [dl[0] for dl in dl_histories]
+    mstar_arrays = [np.asarray(dl[4][0]) for dl in dl_histories]
+
+    zmerge, qmerge, hmerge = get_mergers_of_major_progenitor(main_halo)
+
+    if len(red_all) != len(outputs):
+        print('output array length does not match redshift and time arrays')
+
+    hmerge_added, z_set_vals = group_mergers(zmerge, hmerge)
+
+    accreted_only_particle_ids = np.array([])
+    insitu_only_particle_ids   = np.array([])
+
+    AHF_centers     = pd.read_csv(os.path.join(AHF_centers_filepath, str(DMOname) + "_rec.csv"))         if AHF_centers_filepath is not None else None
+    AHF_centers_acc = pd.read_csv(os.path.join(AHF_centers_filepath, str(DMOname) + "_accreted_rec.csv")) if AHF_centers_filepath is not None else None
+
+    # Initialise N DataFrames and N output files (top-level call only)
+    _empty = pd.DataFrame({'iords': [], 'mstar': [], 't': [], 'z': [], 'type': []})
+    if dfs_tagged_particles is None:
+        dfs_tagged_particles = [_empty.copy() for _ in range(n_instances)]
+
+    if filenames is None:
+        if output_prefix is None:
+            output_prefix = DMOname + '_tagged_recursive'
+        os.makedirs(output_prefix, exist_ok=True)
+        filenames = [os.path.join(output_prefix, f"instance_{k:03d}.csv") for k in range(n_instances)]
+        for fn in filenames:
+            _empty.to_csv(fn, mode='w', header=True)
+
+    acc_halo_path_tagged = np.array([]) if acc_halo_path_tagged is None else acc_halo_path_tagged
+
+    if len(acc_halo_path_tagged) > 0:
+        halo_path = main_halo.calculate_for_progenitors('path()')
+        print("halopath:", halo_path)
+        main_halo_paths = np.array([])
+        main_halo_paths = np.append(main_halo_paths, halo_path[0][0])
+
+        if len(np.where(np.isin(main_halo_paths, acc_halo_path_tagged) == True)[0]) > 0:
+            print("overlap at :", main_halo_paths[np.where(np.isin(main_halo_paths, acc_halo_path_tagged) == True)])
+            print("for halo :", acc_halo_path_tagged)
+            return dfs_tagged_particles, acc_halo_path_tagged
+
+    halo_path = main_halo.calculate_for_progenitors('path()')
+    acc_halo_path_tagged = np.append(acc_halo_path_tagged, halo_path[0][0])
+
+    # Main snapshot loop
+    for i in range(len(outputs)):
+        gc.collect()
+
+        if any(len(t_arrays[k]) == 0 for k in range(n_instances)):
+            continue
+
+        decision  = False
+        decision2 = False
+        decl      = False
+
+        print('Current snapshot -->', outputs[i])
+
+        hDMO  = tangos.get_halo(DMOname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+        z_val = red_all[i]
+        t_val = t_all[i]
+
+        # Compute per-instance mass_select (cheap, no I/O)
+        mass_selects = []
+        for k in range(n_instances):
+            idrz      = np.argmin(abs(t_arrays[k] - t_val))
+            idrz_prev = np.argmin(abs(t_arrays[k] - t_all[i - 1])) if idrz > 0 else None
+            msn = float(mstar_arrays[k][idrz])
+            if msn == 0:
+                mass_selects.append(0)
+                continue
+            msp = float(mstar_arrays[k][idrz_prev]) if idrz_prev is not None else 0.0
+            mass_selects.append(int(msn - msp))
+
+        if not any(m > 0 for m in mass_selects):
+            # Still check mergers below — but don't load the snap yet
+            pass
+
+        # Load snapshot ONCE if any instance needs it or a merger snap is coming
+        merger_snap = (
+            mergers
+            and (i + 1 < len(red_all))
+            and (red_all[i + 1] in z_set_vals)
+        )
+        need_snap = any(m > 0 for m in mass_selects) or merger_snap
+
+        if need_snap:
+            if AHF_centers_filepath is not None:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+
+            simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+            try:
+                print(simfn)
+                print('loading in DMO particles')
+                DMOparticles = pynbody.load(simfn)
+                DMOparticles.physical_units()
+                print('loaded data')
+                decision = True
+            except Exception as e:
+                print(e)
+                print('--> failed to load snapshot, skipping')
+                print("Done with iteration", i)
+                continue
+
+        # Insitu block
+        if any(m > 0 for m in mass_selects):
+            try:
+                hDMO['r200c']
+            except Exception:
+                print("Couldn't load R200 at timestep:", i)
+                del DMOparticles
+                print("Done with iteration", i)
+                continue
+
+            subhalo_iords = np.array([])
+
+            if AHF_centers_filepath is None:
+                print("Halonum:", int(halonums[i]) - 1)
+                h = DMOparticles.halos()[int(halonums[i]) - 1]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                if tag_typ == 'insitu':
+                    AHF_crossref = AHF_centers[AHF_centers['snapshot'] == outputs[i]]['AHF halonum'].values[0]
+                else:
+                    AHF_halonum_acc  = AHF_centers_acc[AHF_centers_acc['snapshot'] == outputs[i]]
+                    HOP_halonum_acc  = int(halonums[i])
+                    AHF_crossref     = AHF_halonum_acc[AHF_halonum_acc['HOP halonum'] == HOP_halonum_acc]['AHF halonum'].values[0]
+
+                h = DMOparticles.halos(halo_numbers="v1")[int(AHF_crossref)]
+                children_ahf_int = h.properties['children']
+                halo_catalogue = DMOparticles.halos(halo_numbers="v1")
+                for ch in children_ahf_int:
+                    if ch != AHF_crossref:
+                        subhalo_iords = np.append(subhalo_iords, halo_catalogue[int(ch)].dm['iord'])
+                h = h[np.logical_not(np.isin(h['iord'], subhalo_iords))] if len(subhalo_iords) > 0 else h
+
+            pynbody.analysis.halo.center(h.dm)
+
+            try:
+                r200c_pyn = pynbody.analysis.halo.virial_radius(h.d, overden=200, r_max=None, rho_def='critical')
+            except Exception:
+                print('could not calculate R200c')
+                del DMOparticles
+                print("Done with iteration", i)
+                continue
+
+            DMOparts_insitu = DMOparticles[
+                sqrt(DMOparticles['pos'][:, 0] ** 2
+                     + DMOparticles['pos'][:, 1] ** 2
+                     + DMOparticles['pos'][:, 2] ** 2) <= r200c_pyn
+            ].dm
+
+            # Angular-momentum ranking ONCE per snap
+            parts_sorted_angmom = rank_order_particles_by_angmom(DMOparts_insitu)
+            del DMOparts_insitu
+
+            # Fan across N instances
+            if parts_sorted_angmom.shape[0] > 0:
+                for k in range(n_instances):
+                    if mass_selects[k] <= 0:
+                        continue
+                    arr = assign_stars_to_particles(mass_selects[k], parts_sorted_angmom, float(free_param_value))
+                    row = pd.DataFrame({
+                        'iords': arr[0],
+                        'mstar': arr[1],
+                        't':    np.repeat(t_val,  len(arr[0])),
+                        'z':    np.repeat(z_val,  len(arr[0])),
+                        'type': np.repeat(tag_typ, len(arr[0])),
+                    })
+                    dfs_tagged_particles[k] = pd.concat([dfs_tagged_particles[k], row], ignore_index=True)
+                    if filenames[k] is not None:
+                        row.to_csv(filenames[k], mode='a', header=False)
+
+        # Mergers block
+        if merger_snap:
+            decision2 = False if decision else True
+            decl = False
+            t_id = int(np.where(z_set_vals == red_all[i + 1])[0][0])
+
+            for hDM in hmerge_added[t_id][0]:
+                gc.collect()
+                print('halo:', hDM)
+
+                try:
+                    prob_occupied = calculate_poccupied(hDM, 2.5e7)
+                except Exception as e:
+                    print(e)
+                    print("poccupied couldn't be calculated")
+                    continue
+
+                if np.random.random() > prob_occupied:
+                    print('Skipped')
+                    continue
+
+                tidx             = int(np.where(np.asarray(DMOsim.timesteps[:]) == hDMO.timestep)[0][0])
+                acc_halo_path    = hDM.calculate_for_progenitors('path()')
+                halonumber_hDM   = hDM.calculate_for_progenitors('halo_number()')[0][0]
+                print('halonum merging:', halonumber_hDM)
+
+                if main_halo_paths is not None:
+                    if len(np.where(np.isin(main_halo_paths, acc_halo_path_tagged) == True)[0]) != 0:
+                        continue
+
+                if len(np.where(np.isin(acc_halo_path, acc_halo_path_tagged) == True)[0]) == 0:
+                    # Halo not yet tagged — recurse for all N instances
+                    print('---recursion triggered -----')
+                    dfs_tagged_particles, acc_halo_path_tagged = angmom_tag_multi_instance_recursive(
+                        DMOsim,
+                        n_instances,
+                        tidx,
+                        halonumber_hDM,
+                        free_param_value=float(free_param_value_acc),
+                        free_param_value_acc=float(free_param_value_acc),
+                        pynbody_path=pynbody_path,
+                        AHF_centers_filepath=AHF_centers_filepath,
+                        dfs_tagged_particles=dfs_tagged_particles,
+                        tag_typ='accreted',
+                        acc_halo_path_tagged=acc_halo_path_tagged,
+                        filenames=filenames,
+                    )
+                    print('---recursion end -----')
+
+                else:
+                    # Halo already tagged — apply remaining mass at this snap, per instance
+                    # Load snap if not already loaded
+                    if decision2:
+                        simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+                        if AHF_centers_filepath is not None:
+                            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                        try:
+                            DMOparticles = pynbody.load(simfn)
+                            DMOparticles.physical_units()
+                            print('loaded data in mergers')
+                        except Exception:
+                            print('--> DMO particle data exists but failed to read it, skipping!')
+                            continue
+                        decision2 = False
+                        decl = True
+
+                    # Center and rank accreted particles ONCE for this merger halo
+                    try:
+                        HOP_halonum_acc = int(hDM.calculate('halo_number()'))
+                        if AHF_centers_filepath is not None:
+                            AHF_halonum_acc      = AHF_centers_acc[AHF_centers_acc['snapshot'] == outputs[i]]
+                            AHF_halonum_accreted = AHF_halonum_acc[AHF_halonum_acc['HOP halonum'] == HOP_halonum_acc]['AHF halonum'].values[0]
+                            h_merge = DMOparticles.halos(halo_numbers="v1")[AHF_halonum_accreted]
+                        else:
+                            h_merge = DMOparticles.halos()[HOP_halonum_acc - 1]
+                        pynbody.analysis.halo.center(h_merge, mode='hyb')
+                        r200c_pyn_acc = pynbody.analysis.halo.virial_radius(h_merge.d, overden=200, r_max=None, rho_def='critical')
+                    except Exception as ex:
+                        print('centering data unavailable, skipping', ex)
+                        continue
+
+                    DMOparts_acc = DMOparticles[
+                        sqrt(DMOparticles['pos'][:, 0] ** 2
+                             + DMOparticles['pos'][:, 1] ** 2
+                             + DMOparticles['pos'][:, 2] ** 2) <= r200c_pyn_acc
+                    ]
+                    try:
+                        acc_sorted = rank_order_particles_by_angmom(DMOparts_acc.dm)
+                    except Exception:
+                        del DMOparts_acc
+                        continue
+                    del DMOparts_acc
+
+                    # Each instance gets its own DarkLight draw (n=1) for the remaining mass
+                    for k in range(n_instances):
+                        try:
+                            _, _, _, _, _, mstar_merging_k = DarkLight(hDM, DMO=True, n=1, mergers=True)
+                            mstar_merging_k = mstar_merging_k[0]
+                        except Exception as e:
+                            print(e, '-- skipping instance', k)
+                            continue
+
+                        if len(mstar_merging_k) == 0:
+                            continue
+
+                        mass_merge_k = mstar_merging_k[-1] - mstar_merging_k[-2] if len(mstar_merging_k) > 1 else mstar_merging_k[-1]
+                        if int(mass_merge_k) < 1:
+                            continue
+
+                        arr = assign_stars_to_particles(int(mass_merge_k), acc_sorted, float(free_param_value_acc))
+                        row = pd.DataFrame({
+                            'iords': arr[0],
+                            'mstar': arr[1],
+                            't':    np.repeat(t_val,     len(arr[0])),
+                            'z':    np.repeat(z_val,     len(arr[0])),
+                            'type': np.repeat('accreted', len(arr[0])),
+                        })
+                        dfs_tagged_particles[k] = pd.concat([dfs_tagged_particles[k], row], ignore_index=True)
+                        if filenames[k] is not None:
+                            row.to_csv(filenames[k], mode='a', header=False)
+
+        if decision or decl:
+            del DMOparticles
+
+        print("Done with iteration", i)
+
+    return dfs_tagged_particles, acc_halo_path_tagged
 
 
-    
-    
-    
-    
-    
 
