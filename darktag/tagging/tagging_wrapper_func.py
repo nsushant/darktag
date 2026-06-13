@@ -513,7 +513,7 @@ def calculate_reffs_multi_instance(
         t_val  = t_all[i]
         z_val  = red_all[i]
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue if AHF_halonums is not None else pynbody.halo.hop.HOPCatalogue][0]
+        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue if AHF_halonums is not None else pynbody.halo.hop.HOPCatalogue]
 
         simfn = join(pynbody_path, outputs[i])
         try:
