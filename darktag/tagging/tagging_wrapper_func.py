@@ -277,8 +277,9 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
             
             children_dm,children_st,sub_halonums = get_child_iords(h,DMOparticles.halos(halo_numbers='v1'),DMO_state='DMO')
             
-            DMOparticles.physical_units()    
+            DMOparticles.physical_units()
             pynbody.analysis.halo.center(h)
+            pynbody.analysis.angmom.faceon(h.dm)
 
         except Exception as e:
             print('centering data unavailable',e)
@@ -366,7 +367,7 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
             R_half = sorted_distances[np.where(cumilative_sum >= (cumilative_sum[-1]/2))[0][0]]
 
             lum_for_each_part = produce_lums_grouped( dt_all, particle_selection_reff_tot['iord'], t_all[i])
-            hlight_r = calc_halflight(particle_selection_reff_tot, lum_for_each_part, band='v', cylindrical=False)
+            hlight_r = calc_halflight(particle_selection_reff_tot, lum_for_each_part, band='v', cylindrical=True)
             
             print(hlight_r)
             
