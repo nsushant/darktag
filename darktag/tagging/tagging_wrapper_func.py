@@ -376,7 +376,11 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
             stored_time = np.append(stored_time, t_all[i])
                
             stored_reff = np.append(stored_reff,float(R_half))
-            kravtsov = hDMO['r200c']*0.02
+            try:
+                kravtsov = hDMO['r200c']*0.02
+            except KeyError:
+                print('r200c not available for this halo, storing NaN for kravtsov')
+                kravtsov = float('nan')
             kravtsov_r = np.append(kravtsov_r,kravtsov)
 
             particle_selection_reff_tot['pos'] += cen_stars
@@ -605,16 +609,20 @@ def calculate_reffs_over_full_sim(DMOsim, data_particles_tagged, pynbody_path  =
             stored_time = np.append(stored_time, t_all[i])
                
             stored_reff = np.append(stored_reff,float(R_half))
-            kravtsov = hDMO['r200c']*0.02
+            try:
+                kravtsov = hDMO['r200c']*0.02
+            except KeyError:
+                print('r200c not available for this halo, storing NaN for kravtsov')
+                kravtsov = float('nan')
             kravtsov_r = np.append(kravtsov_r,kravtsov)
 
             particle_selection_reff_tot['pos'] += cen_stars
 
             print('halfmass radius:',R_half)
             print('Kravtsov_radius:',kravtsov)
-            
-        
-  
+
+
+
 
     print('---------------------------------------------------------------writing output file --------------------------------------------------------------------')
 
