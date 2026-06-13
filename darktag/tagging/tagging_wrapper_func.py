@@ -180,7 +180,7 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
 
     AHF_centers = pd.read_csv(str(path_AHF_halonums)) if AHF_centers_supplied == True else None
             
-    for i in range(len(outputs)):
+    for i in range(len(outputs))[::-1]:
 
         gc.collect()
 
