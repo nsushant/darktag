@@ -339,13 +339,16 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
     
             masses = [ data_grouped.loc[n]['mstar'] for n in particle_selection_reff_tot['iord']]
 
-            masses_insitu = [data_insitu.loc[iord]['mstar'] for iord in particles_only_insitu['iord']]
-                
-            cen_stars = calc_3D_cm(particles_only_insitu,masses_insitu)
-            
+            if len(particles_only_insitu) > 0:
+                masses_insitu = [data_insitu.loc[iord]['mstar'] for iord in particles_only_insitu['iord']]
+                cen_stars = calc_3D_cm(particles_only_insitu, masses_insitu)
+            else:
+                print('no insitu particles at this snap, centering on all tagged particles')
+                cen_stars = calc_3D_cm(particle_selection_reff_tot, masses)
+
             particle_selection_reff_tot['pos'] -= cen_stars
-            
-            # new cutoff calc begins 
+
+            # new cutoff calc begins
             distances = np.sqrt(particle_selection_reff_tot['x']**2+particle_selection_reff_tot['y']**2) #+ particle_selection_reff_tot['z']**2)                
                         
             idxs_distances_sorted = np.argsort(distances)
@@ -562,12 +565,15 @@ def calculate_reffs_over_full_sim(DMOsim, data_particles_tagged, pynbody_path  =
     
             masses = [dfnew.loc[n]['mstar'] for n in particle_selection_reff_tot['iord']]
 
-            masses_insitu = [data_insitu.loc[iord]['mstar'] for iord in particles_only_insitu['iord']]
-                
-            cen_stars = calc_3D_cm(particles_only_insitu,masses_insitu)
-            
+            if len(particles_only_insitu) > 0:
+                masses_insitu = [data_insitu.loc[iord]['mstar'] for iord in particles_only_insitu['iord']]
+                cen_stars = calc_3D_cm(particles_only_insitu, masses_insitu)
+            else:
+                print('no insitu particles at this snap, centering on all tagged particles')
+                cen_stars = calc_3D_cm(particle_selection_reff_tot, masses)
+
             particle_selection_reff_tot['pos'] -= cen_stars
-            
+
             masses = [dfnew.loc[n]['mstar'] for n in particle_selection_reff_tot['iord']]
 
             #particle_selection_reff_tot['pos'] -= cen_stars 

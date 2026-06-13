@@ -7,11 +7,16 @@ from ..config import config
 
 def calc_3D_cm(particles,masses):
 
-    x_cm = sum(particles['x']*masses)/sum(masses)
+    total_mass = sum(masses)
 
-    y_cm = sum(particles['y']*masses)/sum(masses)
+    if total_mass == 0:
+        return np.zeros(3)
 
-    z_cm = sum(particles['z']*masses)/sum(masses)
+    x_cm = sum(particles['x']*masses)/total_mass
+
+    y_cm = sum(particles['y']*masses)/total_mass
+
+    z_cm = sum(particles['z']*masses)/total_mass
 
     return np.asarray([x_cm,y_cm,z_cm])
 
