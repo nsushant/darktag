@@ -403,6 +403,270 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
     return df_reff
 
 
+def calculate_reffs_multi_instance(
+    DMOsim,
+    tagged_dir,
+    pynbody_path=None,
+    path_AHF_halonums=None,
+    AHF_centers_supplied=False,
+    halo_number=0,
+    output_dir=None,
+    save_to_file=True,
+):
+    '''
+    Multi-instance variant of calculate_reffs_over_full_sim.
+
+    Loads each snapshot ONCE and calculates reffs for all instance particle files
+    found in tagged_dir (instance_000.csv, instance_001.csv, ...).
+    Each instance maintains its own PrevBGMMIords for independent DBSCAN tracking.
+
+    Inputs:
+        DMOsim            - tangos simulation object
+        tagged_dir        - directory containing instance_*.csv tagged particle files
+        pynbody_path      - path to snapshot data (defaults to config)
+        path_AHF_halonums - path to AHF halo number crossref CSV (optional)
+        AHF_centers_supplied - whether AHF centering file is provided
+        halo_number       - halo number (default 0)
+        output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
+        save_to_file      - whether to write CSVs incrementally (default True)
+
+    Returns:
+        list of reff DataFrames, one per instance
+    '''
+
+    if pynbody_path is None:
+        pynbody_path = config.get_path("pynbody_path")
+
+    if output_dir is None:
+        output_dir = tagged_dir.rstrip('/') + '_reffs'
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Discover instance files
+    instance_files = sorted([
+        f for f in os.listdir(tagged_dir) if f.startswith('instance_') and f.endswith('.csv')
+    ])
+    if len(instance_files) == 0:
+        raise FileNotFoundError(f'No instance_*.csv files found in {tagged_dir}')
+    n_instances = len(instance_files)
+    print(f'Found {n_instances} instance files in {tagged_dir}')
+
+    # AHF setup
+    AHF_halonums = None
+    if path_AHF_halonums is None:
+        pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+    else:
+        if os.path.isfile(path_AHF_halonums):
+            AHF_halonums = pd.read_csv(path_AHF_halonums)
+            if len(AHF_halonums['snapshot']) > 0:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+
+    AHF_centers = pd.read_csv(str(path_AHF_halonums)) if AHF_centers_supplied else None
+
+    # Tangos indexing (shared across all instances)
+    simname = DMOsim.path
+    split = simname.split('_')
+    halonum = split[0][4:]
+    DMOname = 'Halo' + halonum + '_DMO' + ('' if len(split) == 2 else ('_' + '_'.join(split[2:])))
+
+    main_halo = DMOsim.timesteps[-1].halos[int(halo_number)]
+    halonums = main_halo.calculate_for_progenitors('halo_number()')[0][::-1]
+    t_all    = main_halo.calculate_for_progenitors('t()')[0][::-1]
+    red_all  = main_halo.calculate_for_progenitors('z()')[0][::-1]
+
+    outputs_all   = np.array([DMOsim.timesteps[i].__dict__['extension']  for i in range(len(DMOsim.timesteps))])
+    times_tangos  = np.array([DMOsim.timesteps[i].__dict__['time_gyr']   for i in range(len(DMOsim.timesteps))])
+    outputs = outputs_all[np.isin(times_tangos, t_all)]
+    outputs.sort()
+
+    if len(red_all) != len(outputs):
+        print('output array length does not match redshift and time arrays')
+
+    # Load all instance particle DataFrames
+    all_data = [pd.read_csv(os.path.join(tagged_dir, f)) for f in instance_files]
+    all_data_t = [np.asarray(d['t'].values) for d in all_data]
+
+    # Per-instance state
+    PrevBGMMIords  = [np.array([]) for _ in range(n_instances)]
+    stored_reff    = [np.array([]) for _ in range(n_instances)]
+    stored_reff_z  = [np.array([]) for _ in range(n_instances)]
+    stored_time    = [np.array([]) for _ in range(n_instances)]
+    kravtsov_r     = [np.array([]) for _ in range(n_instances)]
+    lum_halflight  = [np.array([]) for _ in range(n_instances)]
+
+    # Output filenames
+    out_fnames = [os.path.join(output_dir, f.replace('instance_', 'reff_instance_')) for f in instance_files]
+
+    clustering_cfg = config.get('tagging', 'clustering')
+
+    # ── Main snapshot loop (reversed so DBSCAN seeds from z=0) ────────────────
+    for i in range(len(outputs))[::-1]:
+        gc.collect()
+        print('Current snapshot -->', outputs[i])
+
+        # ── Snap-level work (done ONCE) ───────────────────────────────────────
+        hDMO   = tangos.get_halo(DMOname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+        t_val  = t_all[i]
+        z_val  = red_all[i]
+
+        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue if AHF_halonums is not None else pynbody.halo.hop.HOPCatalogue][0]
+
+        simfn = join(pynbody_path, outputs[i])
+        try:
+            DMOparticles = pynbody.load(simfn)
+        except Exception as e:
+            print(f'--> Failed to load snapshot, skipping! Error: {e}')
+            continue
+
+        try:
+            if not AHF_centers_supplied:
+                if AHF_halonums is not None:
+                    halonum_snap = AHF_halonums[AHF_halonums["snapshot"] == str(outputs[i])]["AHF halonum"].values
+                    h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap)]
+                else:
+                    h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                AHF_crossref = AHF_centers[AHF_centers['i'] == i]['AHF catalogue id'].values[0]
+                h = DMOparticles.halos()[int(AHF_crossref)]
+
+            children_dm, children_st, sub_halonums = get_child_iords(
+                h, DMOparticles.halos(halo_numbers='v1'), DMO_state='DMO'
+            )
+            DMOparticles.physical_units()
+            pynbody.analysis.halo.center(h)
+            pynbody.analysis.angmom.faceon(h.dm)
+        except Exception as e:
+            print('centering data unavailable', e)
+            continue
+
+        try:
+            r200c_pyn = pynbody.analysis.halo.virial_radius(h.d, overden=200, r_max=None, rho_def='critical')
+        except Exception:
+            print('could not calculate R200c')
+            continue
+
+        try:
+            kravtsov = hDMO['r200c'] * 0.02
+        except KeyError:
+            print('r200c not available for this halo, storing NaN for kravtsov')
+            kravtsov = float('nan')
+
+        # Filter snap particles once
+        within_r200 = sqrt(DMOparticles['pos'][:, 0]**2 +
+                           DMOparticles['pos'][:, 1]**2 +
+                           DMOparticles['pos'][:, 2]**2) <= r200c_pyn
+        DMOparts_snap = DMOparticles[within_r200]
+        DMOparts_snap = DMOparts_snap[np.logical_not(np.isin(DMOparts_snap['iord'], children_dm))]
+
+        # ── Per-instance work ─────────────────────────────────────────────────
+        for k in range(n_instances):
+            if len(np.where(all_data_t[k] <= float(t_val))) == 0:
+                continue
+
+            dt_all_k      = all_data[k][all_data[k]['t'] <= t_val]
+            data_grouped_k = dt_all_k.groupby(['iords']).sum()
+            selected_iords_tot_k = data_grouped_k.index.values
+
+            if selected_iords_tot_k.shape[0] == 0:
+                continue
+
+            data_insitu_k = dt_all_k[dt_all_k['type'] == 'insitu'].groupby(['iords']).sum()
+            selected_iords_insitu_k = data_insitu_k.index.values
+
+            particle_sel_k   = DMOparts_snap[np.isin(DMOparts_snap['iord'], selected_iords_tot_k)]    if len(selected_iords_tot_k) > 0     else []
+            parts_insitu_k   = DMOparts_snap[np.isin(DMOparts_snap['iord'], selected_iords_insitu_k)] if len(selected_iords_insitu_k) > 0  else []
+
+            if len(particle_sel_k) == 0:
+                continue
+
+            # DBSCAN with this instance's own PrevBGMMIords
+            masses_for_clustering_k = np.array([data_grouped_k.loc[iord]['mstar'] for iord in particle_sel_k['iord']])
+            labels, best_label, _ = cluster_tagged_particles(
+                particles=particle_sel_k,
+                prev_iords=PrevBGMMIords[k] if len(PrevBGMMIords[k]) > 0 else None,
+                method=clustering_cfg.get('method', 'dbscan'),
+                feature_cols=clustering_cfg.get('features', ['x', 'y']),
+                scale=clustering_cfg.get('scale', False),
+                sample_weight=masses_for_clustering_k,
+                eps=config.get_with_default('dbscan', 'eps', 0.05),
+                dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
+                min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
+                hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
+                cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
+                cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
+                allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
+                max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+            )
+            if best_label == -1:
+                continue
+
+            particle_sel_k = particle_sel_k[np.where(labels == best_label)]
+            PrevBGMMIords[k] = np.asarray(particle_sel_k['iord'])
+
+            masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
+
+            if len(parts_insitu_k) > 0:
+                masses_insitu_k = [data_insitu_k.loc[iord]['mstar'] for iord in parts_insitu_k['iord']]
+                cen_stars_k = calc_3D_cm(parts_insitu_k, masses_insitu_k)
+            else:
+                cen_stars_k = calc_3D_cm(particle_sel_k, masses_k)
+
+            particle_sel_k['pos'] -= cen_stars_k
+
+            distances_k = np.sqrt(particle_sel_k['x']**2 + particle_sel_k['y']**2)
+            idxs_sorted = np.argsort(distances_k)
+            sorted_dists = np.sort(distances_k)
+            dist_ordered_iords = np.asarray(particle_sel_k['iord'][idxs_sorted])
+
+            sorted_masses_k = [data_grouped_k.loc[n]['mstar'] for n in dist_ordered_iords]
+            cumsum_k = np.cumsum(sorted_masses_k)
+            R_half_k = sorted_dists[np.where(cumsum_k >= (cumsum_k[-1] / 2))[0][0]]
+
+            lum_k = produce_lums_grouped(dt_all_k, particle_sel_k['iord'], t_val)
+            hlight_k = calc_halflight(particle_sel_k, lum_k, band='v', cylindrical=True)
+
+            particle_sel_k['pos'] += cen_stars_k
+
+            stored_reff[k]   = np.append(stored_reff[k],   float(R_half_k))
+            stored_reff_z[k] = np.append(stored_reff_z[k], z_val)
+            stored_time[k]   = np.append(stored_time[k],   t_val)
+            kravtsov_r[k]    = np.append(kravtsov_r[k],    kravtsov)
+            lum_halflight[k] = np.append(lum_halflight[k], hlight_k)
+
+            if save_to_file:
+                df_k = pd.DataFrame({
+                    'halflight': lum_halflight[k],
+                    'reff':      stored_reff[k],
+                    'z':         stored_reff_z[k],
+                    't':         stored_time[k],
+                    'kravtsov':  kravtsov_r[k],
+                })
+                df_k.to_csv(out_fnames[k])
+
+        del DMOparticles, DMOparts_snap
+
+    # Build final DataFrames
+    dfs_reff = []
+    for k in range(n_instances):
+        df_k = pd.DataFrame({
+            'halflight': lum_halflight[k],
+            'reff':      stored_reff[k],
+            'z':         stored_reff_z[k],
+            't':         stored_time[k],
+            'kravtsov':  kravtsov_r[k],
+        })
+        dfs_reff.append(df_k)
+        if save_to_file:
+            df_k.to_csv(out_fnames[k])
+            print(f'Wrote {out_fnames[k]}')
+
+    return dfs_reff
+
+
 '''
 def calculate_reffs_over_full_sim(DMOsim, data_particles_tagged, pynbody_path  = None , AHF_centers_file = None):
 
