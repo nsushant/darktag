@@ -498,13 +498,29 @@ def calculate_reffs_multi_instance(
     all_data = [pd.read_csv(os.path.join(tagged_dir, f)) for f in instance_files]
     all_data_t = [np.asarray(d['t'].values) for d in all_data]
 
-    # Per-instance state
+    # Per-instance state — pre-populated from existing output CSVs if resuming
     PrevBGMMIords  = [np.array([]) for _ in range(n_instances)]
     stored_reff    = [np.array([]) for _ in range(n_instances)]
     stored_reff_z  = [np.array([]) for _ in range(n_instances)]
     stored_time    = [np.array([]) for _ in range(n_instances)]
     kravtsov_r     = [np.array([]) for _ in range(n_instances)]
     lum_halflight  = [np.array([]) for _ in range(n_instances)]
+    processed_t    = [set() for _ in range(n_instances)]
+
+    for k, fname in enumerate(out_fnames):
+        if os.path.isfile(fname):
+            try:
+                existing = pd.read_csv(fname, index_col=0)
+                if len(existing) > 0:
+                    stored_reff[k]   = existing['reff'].values
+                    stored_reff_z[k] = existing['z'].values
+                    stored_time[k]   = existing['t'].values
+                    kravtsov_r[k]    = existing['kravtsov'].values
+                    lum_halflight[k] = existing['halflight'].values
+                    processed_t[k]   = set(existing['t'].values)
+                    print(f'  instance {k:03d}: resuming, {len(existing)} snapshots already done')
+            except Exception as e:
+                print(f'  instance {k:03d}: could not read existing output ({e}), starting fresh')
 
     # Output filenames
     out_fnames = [os.path.join(output_dir, f.replace('instance_', 'reff_instance_')) for f in instance_files]
@@ -587,6 +603,9 @@ def calculate_reffs_multi_instance(
             selected_iords_tot_k = data_grouped_k.index.values
 
             if selected_iords_tot_k.shape[0] == 0:
+                continue
+
+            if t_val in processed_t[k]:
                 continue
 
             data_insitu_k = dt_all_k[dt_all_k['type'] == 'insitu'].groupby(['iords']).sum()
