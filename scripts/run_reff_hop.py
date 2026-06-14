@@ -25,6 +25,8 @@ def main():
                         help='Halo number (default: 1)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
                         help='Disable DBSCAN clustering when calculating reffs')
+    parser.add_argument('--ahf', action='store_true', default=False,
+                        help='Use AHF halo catalogue instead of HOP')
     args = parser.parse_args()
 
     sim_name = args.sim_name
@@ -49,6 +51,7 @@ def main():
         halo_number=args.halonumber,
         reffs_fname=reffs_fname,
         use_clustering=not args.no_clustering,
+        use_ahf=args.ahf,
     )
 
     print(f'\nSaved: {reffs_fname}')

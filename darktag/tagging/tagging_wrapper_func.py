@@ -80,7 +80,7 @@ def tag_particles(DMO_database, path_to_particle_data = None, tagging_method = '
 
 
 
-def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0, reffs_fname='reffs.csv', use_clustering=True):
+def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = None, path_AHF_halonums=None, from_file = False ,from_dataframe=False,save_to_file=True,AHF_centers_supplied=False,machine='astro',physics='edge1',halo_number=0, reffs_fname='reffs.csv', use_clustering=True, use_ahf=False):
     
     # Use config path if pynbody_path not provided
     if pynbody_path is None:
@@ -245,8 +245,11 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
                     h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap)]                        
                     
                 else:
-                    #pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-                    h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i])-1]
+                    if use_ahf:
+                        h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
+                    else:
+                        hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                        h = hop_cat[int(halonums[i]) - 1]
 
 
             elif AHF_centers_supplied == True:
@@ -275,7 +278,11 @@ def calculate_reffs_over_full_sim(DMOsim, particles_tagged,  pynbody_path  = Non
                 h = h[np.logical_not(np.isin(h['iord'],subhalo_iords))] if len(subhalo_iords) >0 else h
                 
             
-            children_dm,children_st,sub_halonums = get_child_iords(h,DMOparticles.halos(halo_numbers='v1'),DMO_state='DMO')
+            if use_ahf or AHF_halonums is not None:
+                halo_cat = DMOparticles.halos(halo_numbers='v1')
+            else:
+                halo_cat = hop_cat
+            children_dm, children_st, sub_halonums = get_child_iords(h, halo_cat, DMO_state='DMO')
             
             DMOparticles.physical_units()
             pynbody.analysis.halo.center(h)
@@ -413,6 +420,7 @@ def calculate_reffs_multi_instance(
     output_dir=None,
     save_to_file=True,
     use_clustering=True,
+    use_ahf=False,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -528,15 +536,21 @@ def calculate_reffs_multi_instance(
                     halonum_snap = AHF_halonums[AHF_halonums["snapshot"] == str(outputs[i])]["AHF halonum"].values
                     h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap)]
                 else:
-                    h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
+                    if use_ahf:
+                        h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
+                    else:
+                        hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                        h = hop_cat[int(halonums[i]) - 1]
             else:
                 pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
                 AHF_crossref = AHF_centers[AHF_centers['i'] == i]['AHF catalogue id'].values[0]
                 h = DMOparticles.halos()[int(AHF_crossref)]
 
-            children_dm, children_st, sub_halonums = get_child_iords(
-                h, DMOparticles.halos(halo_numbers='v1'), DMO_state='DMO'
-            )
+            if use_ahf or AHF_halonums is not None:
+                halo_cat = DMOparticles.halos(halo_numbers='v1')
+            else:
+                halo_cat = hop_cat
+            children_dm, children_st, sub_halonums = get_child_iords(h, halo_cat, DMO_state='DMO')
             DMOparticles.physical_units()
             pynbody.analysis.halo.center(h)
             pynbody.analysis.angmom.faceon(h.dm)

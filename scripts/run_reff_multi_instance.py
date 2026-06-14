@@ -33,6 +33,8 @@ def main():
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
                         help='Disable DBSCAN clustering when calculating reffs')
+    parser.add_argument('--ahf', action='store_true', default=False,
+                        help='Use AHF halo catalogue instead of HOP')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
@@ -54,6 +56,7 @@ def main():
         halo_number=args.halonumber,
         output_dir=args.output_dir,
         use_clustering=not args.no_clustering,
+        use_ahf=args.ahf,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'
