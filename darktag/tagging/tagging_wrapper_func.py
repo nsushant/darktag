@@ -498,6 +498,9 @@ def calculate_reffs_multi_instance(
     all_data = [pd.read_csv(os.path.join(tagged_dir, f)) for f in instance_files]
     all_data_t = [np.asarray(d['t'].values) for d in all_data]
 
+    # Output filenames
+    out_fnames = [os.path.join(output_dir, f.replace('instance_', 'reff_instance_')) for f in instance_files]
+
     # Per-instance state — pre-populated from existing output CSVs if resuming
     PrevBGMMIords  = [np.array([]) for _ in range(n_instances)]
     stored_reff    = [np.array([]) for _ in range(n_instances)]
@@ -521,9 +524,6 @@ def calculate_reffs_multi_instance(
                     print(f'  instance {k:03d}: resuming, {len(existing)} snapshots already done')
             except Exception as e:
                 print(f'  instance {k:03d}: could not read existing output ({e}), starting fresh')
-
-    # Output filenames
-    out_fnames = [os.path.join(output_dir, f.replace('instance_', 'reff_instance_')) for f in instance_files]
 
     clustering_cfg = config.get('tagging', 'clustering')
 
