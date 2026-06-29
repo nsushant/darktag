@@ -727,7 +727,7 @@ def angmom_tag_multi_instance(
                         _, _, _, _, _, mstar_merging_k = DarkLight(
                             hDM, DMO=True, n=1, mergers=True
                         )
-                        if len(mstar_merging_k) == 0:
+                        if np.asarray(mstar_merging_k).size == 0:
                             continue
                     except Exception as e:
                         print(e, '-- skipping instance', k)
@@ -921,7 +921,7 @@ def angmom_tag_multi_instance_hydro_dm(
                 for k in range(n_instances):
                     try:
                         _, _, _, _, _, mstar_merging_k = DarkLight(hDM, DMO=False, n=1, mergers=True)
-                        if len(mstar_merging_k) == 0:
+                        if np.asarray(mstar_merging_k).size == 0:
                             continue
                     except Exception as e:
                         print(e, '-- skipping instance', k)
@@ -1287,7 +1287,7 @@ def angmom_tag_from_cluster_tree(
             for k in range(n_instances):
                 try:
                     _, _, _, _, _, mstar_merging_k = dl_sat[branch_id][k]
-                    if len(mstar_merging_k) == 0:
+                    if np.asarray(mstar_merging_k).size == 0:
                         continue
                 except Exception as e:
                     print(f'  DarkLight result unavailable for {branch_id} instance {k}: {e}')
@@ -2126,7 +2126,7 @@ def angmom_tag_multi_instance_recursive(
                             print(e, '-- skipping instance', k)
                             continue
 
-                        if len(mstar_merging_k) == 0:
+                        if np.asarray(mstar_merging_k).size == 0:
                             continue
 
                         _m_arr = np.asarray(mstar_merging_k)
