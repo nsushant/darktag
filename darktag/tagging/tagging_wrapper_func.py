@@ -595,7 +595,10 @@ def calculate_reffs_multi_instance(
     stored_time    = [np.array([]) for _ in range(n_instances)]
     kravtsov_r     = [np.array([]) for _ in range(n_instances)]
     lum_halflight  = [np.array([]) for _ in range(n_instances)]
-    processed_t    = [set() for _ in range(n_instances)]
+    processed_outputs = [set() for _ in range(n_instances)]
+
+    # build a t → output_name map for reverse-lookup on resume
+    t_to_output = {round(float(t_all[i]), 8): outputs[i] for i in range(len(outputs))}
 
     for k, fname in enumerate(out_fnames):
         if os.path.isfile(fname):
@@ -607,7 +610,11 @@ def calculate_reffs_multi_instance(
                     stored_time[k]   = existing['t'].values
                     kravtsov_r[k]    = existing['kravtsov'].values
                     lum_halflight[k] = existing['halflight'].values
-                    processed_t[k]   = set(existing['t'].values)
+                    # map stored t values back to output names (string keys, no float ambiguity)
+                    for tv in existing['t'].values:
+                        out_name = t_to_output.get(round(float(tv), 8))
+                        if out_name is not None:
+                            processed_outputs[k].add(out_name)
                     print(f'  instance {k:03d}: resuming, {len(existing)} snapshots already done')
             except Exception as e:
                 print(f'  instance {k:03d}: could not read existing output ({e}), starting fresh')
@@ -615,6 +622,12 @@ def calculate_reffs_multi_instance(
     # ── Main snapshot loop (reversed so voxel clustering seeds from z=0) ───────
     for i in range(len(outputs))[::-1]:
         gc.collect()
+
+        # Skip entire snapshot if all instances already have it
+        if all(outputs[i] in processed_outputs[k] for k in range(n_instances)):
+            print(f'Skipping {outputs[i]} (all instances done)')
+            continue
+
         print('Current snapshot -->', outputs[i])
 
         # ── Snap-level work (done ONCE) ───────────────────────────────────────
@@ -690,7 +703,7 @@ def calculate_reffs_multi_instance(
             if selected_iords_tot_k.shape[0] == 0:
                 continue
 
-            if t_val in processed_t[k]:
+            if outputs[i] in processed_outputs[k]:
                 continue
 
             data_insitu_k = dt_all_k[dt_all_k['type'] == 'insitu'].groupby(['iords']).sum()
