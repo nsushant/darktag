@@ -733,7 +733,7 @@ def angmom_tag_multi_instance(
                         print(e, '-- skipping instance', k)
                         continue
 
-                    mass_merge_k = mstar_merging_k[-1]
+                    mass_merge_k = float(np.asarray(mstar_merging_k).flat[-1])
                     if int(mass_merge_k) < 1:
                         continue
 
@@ -927,7 +927,7 @@ def angmom_tag_multi_instance_hydro_dm(
                         print(e, '-- skipping instance', k)
                         continue
 
-                    mass_merge_k = mstar_merging_k[-1]
+                    mass_merge_k = float(np.asarray(mstar_merging_k).flat[-1])
                     if int(mass_merge_k) < 1:
                         continue
 
@@ -1293,7 +1293,7 @@ def angmom_tag_from_cluster_tree(
                     print(f'  DarkLight result unavailable for {branch_id} instance {k}: {e}')
                     continue
 
-                mass_merge_k = mstar_merging_k[-1]
+                mass_merge_k = float(np.asarray(mstar_merging_k).flat[-1])
                 if int(mass_merge_k) < 1:
                     continue
 
@@ -2129,7 +2129,8 @@ def angmom_tag_multi_instance_recursive(
                         if len(mstar_merging_k) == 0:
                             continue
 
-                        mass_merge_k = mstar_merging_k[-1] - mstar_merging_k[-2] if len(mstar_merging_k) > 1 else mstar_merging_k[-1]
+                        _m_arr = np.asarray(mstar_merging_k)
+                        mass_merge_k = float(_m_arr.flat[-1] - _m_arr.flat[-2]) if _m_arr.size > 1 else float(_m_arr.flat[-1])
                         if int(mass_merge_k) < 1:
                             continue
 
