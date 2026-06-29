@@ -4,6 +4,91 @@ from ..config import config
 from .clustering import cluster_tagged_particles
 from ..analysis.calculate import calc_3D_cm, produce_lums_grouped, calc_halflight
 
+
+def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None):
+    """
+    Voxel-based spatial clustering on a set of particles.
+
+    Snaps each particle to a 3-D grid, then builds connected components via
+    26-neighbour union-find on occupied voxels.  Returns a boolean mask
+    selecting the best cluster.
+
+    Parameters
+    ----------
+    positions  : (N, 3) float array – particle positions in physical units (kpc)
+    iords      : (N,)  int array   – particle Iord values
+    voxel_size : float             – voxel edge length (same units as positions)
+    prev_iords : array-like or None – iords from previous snapshot;
+                                      if given, pick cluster with most overlap;
+                                      if None, pick largest cluster
+
+    Returns
+    -------
+    mask : (N,) bool array, or None if no particles / no cluster found
+    """
+    if len(positions) == 0:
+        return None
+
+    vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
+    vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
+    vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
+
+    # voxel key → list of particle indices
+    voxel_dict = {}
+    for idx in range(len(iords)):
+        key = (vx[idx], vy[idx], vz[idx])
+        if key not in voxel_dict:
+            voxel_dict[key] = []
+        voxel_dict[key].append(idx)
+
+    # Union-Find with path compression
+    parent = {k: k for k in voxel_dict}
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    key_set = set(voxel_dict)
+    for (x, y, z) in list(voxel_dict):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for dz in (-1, 0, 1):
+                    if dx == dy == dz == 0:
+                        continue
+                    nb = (x + dx, y + dy, z + dz)
+                    if nb in key_set:
+                        union((x, y, z), nb)
+
+    # group particle indices by cluster root
+    clusters = {}
+    for key, idxs in voxel_dict.items():
+        root = find(key)
+        if root not in clusters:
+            clusters[root] = []
+        clusters[root].extend(idxs)
+
+    if not clusters:
+        return None
+
+    if prev_iords is not None and len(prev_iords) > 0:
+        prev_set = set(prev_iords)
+        best_root = max(clusters,
+                        key=lambda r: sum(1 for idx in clusters[r] if iords[idx] in prev_set))
+    else:
+        best_root = max(clusters, key=lambda r: len(clusters[r]))
+
+    mask = np.zeros(len(iords), dtype=bool)
+    for idx in clusters[best_root]:
+        mask[idx] = True
+    return mask
+
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
 
     '''
@@ -421,13 +506,14 @@ def calculate_reffs_multi_instance(
     save_to_file=True,
     use_clustering=True,
     use_ahf=False,
+    voxel_fraction=0.05,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
 
     Loads each snapshot ONCE and calculates reffs for all instance particle files
     found in tagged_dir (instance_000.csv, instance_001.csv, ...).
-    Each instance maintains its own PrevBGMMIords for independent DBSCAN tracking.
+    Each instance maintains its own PrevVoxelIords for independent voxel-cluster tracking.
 
     Inputs:
         DMOsim            - tangos simulation object
@@ -438,6 +524,7 @@ def calculate_reffs_multi_instance(
         halo_number       - halo number (default 0)
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
+        voxel_fraction    - voxel size as fraction of r200c (default 0.05)
 
     Returns:
         list of reff DataFrames, one per instance
@@ -502,7 +589,7 @@ def calculate_reffs_multi_instance(
     out_fnames = [os.path.join(output_dir, f.replace('instance_', 'reff_instance_')) for f in instance_files]
 
     # Per-instance state — pre-populated from existing output CSVs if resuming
-    PrevBGMMIords  = [np.array([]) for _ in range(n_instances)]
+    PrevVoxelIords  = [np.array([]) for _ in range(n_instances)]
     stored_reff    = [np.array([]) for _ in range(n_instances)]
     stored_reff_z  = [np.array([]) for _ in range(n_instances)]
     stored_time    = [np.array([]) for _ in range(n_instances)]
@@ -525,9 +612,7 @@ def calculate_reffs_multi_instance(
             except Exception as e:
                 print(f'  instance {k:03d}: could not read existing output ({e}), starting fresh')
 
-    clustering_cfg = config.get('tagging', 'clustering')
-
-    # ── Main snapshot loop (reversed so DBSCAN seeds from z=0) ────────────────
+    # ── Main snapshot loop (reversed so voxel clustering seeds from z=0) ───────
     for i in range(len(outputs))[::-1]:
         gc.collect()
         print('Current snapshot -->', outputs[i])
@@ -617,29 +702,19 @@ def calculate_reffs_multi_instance(
             if len(particle_sel_k) == 0:
                 continue
 
-            # DBSCAN with this instance's own PrevBGMMIords
+            # Voxel clustering with this instance's own PrevVoxelIords
             if use_clustering:
-                masses_for_clustering_k = np.array([data_grouped_k.loc[iord]['mstar'] for iord in particle_sel_k['iord']])
-                labels, best_label, _ = cluster_tagged_particles(
-                    particles=particle_sel_k,
-                    prev_iords=PrevBGMMIords[k] if len(PrevBGMMIords[k]) > 0 else None,
-                    method=clustering_cfg.get('method', 'dbscan'),
-                    feature_cols=clustering_cfg.get('features', ['x', 'y']),
-                    scale=clustering_cfg.get('scale', False),
-                    sample_weight=masses_for_clustering_k,
-                    eps=config.get_with_default('dbscan', 'eps', 0.05),
-                    dbscan_min_samples=config.get_with_default('dbscan', 'min_samples', 2),
-                    min_cluster_size=config.get_with_default('hdbscan', 'min_cluster_size', 10),
-                    hdbscan_min_samples=config.get_with_default('hdbscan', 'min_samples', None),
-                    cluster_selection_epsilon=config.get_with_default('hdbscan', 'cluster_selection_epsilon', 0.0),
-                    cluster_selection_method=config.get_with_default('hdbscan', 'cluster_selection_method', 'eom'),
-                    allow_single_cluster=config.get_with_default('hdbscan', 'allow_single_cluster', True),
-                    max_cluster_size=config.get_with_default('hdbscan', 'max_cluster_size', None),
+                pos_k    = np.array(particle_sel_k['pos'])
+                iords_k  = np.asarray(particle_sel_k['iord'])
+                vox_size = float(r200c_pyn) * voxel_fraction
+                mask_k   = _voxel_pick_cluster(
+                    pos_k, iords_k, vox_size,
+                    prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
                 )
-                if best_label == -1:
+                if mask_k is None or mask_k.sum() == 0:
                     continue
-                particle_sel_k = particle_sel_k[np.where(labels == best_label)]
-                PrevBGMMIords[k] = np.asarray(particle_sel_k['iord'])
+                particle_sel_k  = particle_sel_k[mask_k]
+                PrevVoxelIords[k] = np.asarray(particle_sel_k['iord'])
 
             masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 

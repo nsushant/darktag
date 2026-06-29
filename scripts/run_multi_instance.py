@@ -25,6 +25,7 @@ from darktag.config import config
 from darktag.tagging.angular_momentum_tagging import (
     angmom_tag_multi_instance,
     angmom_tag_multi_instance_recursive,
+    angmom_tag_from_cluster_tree,
 )
 
 
@@ -47,16 +48,34 @@ def main():
                         help="Occupation fraction regime: 'all', 'nadler20', 'edge1', 'edgert' (default: all)")
     parser.add_argument('--recursive', action='store_true', default=False,
                         help='Use recursive variant (walks full merger tree, mirrors run_tagging_hop.py)')
+    parser.add_argument('--cluster-file', type=str, default=None,
+                        help='HDF5 file of tracked cluster iords (from track_cluster.py); restricts tagging to cluster particles')
+    parser.add_argument('--cluster-tree', type=str, default=None,
+                        help='HDF5 cluster tree file (from track_cluster.py multi-branch output); uses angmom_tag_from_cluster_tree')
+    parser.add_argument('--db-name', type=str, default=None,
+                        help='Tangos DB filename stem (default: first _-delimited token of sim_name, e.g. Halo1459)')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
     tangos_path = config.get_path('tangos_path')
+    db_stem     = args.db_name or sim_name.split('_')[0]
 
     import tangos
-    tangos.core.init_db(pjoin(tangos_path, sim_name.split('_')[0] + '.db'))
+    tangos.core.init_db(pjoin(tangos_path, db_stem + '.db'))
     sim = tangos.get_simulation(sim_name)
 
-    if args.recursive:
+    if args.cluster_tree:
+        output_prefix = args.output_prefix or f'{sim_name}_tagged_tree'
+        filenames = angmom_tag_from_cluster_tree(
+            sim,
+            cluster_tree_file=args.cluster_tree,
+            n_instances=args.n_instances,
+            halonumber=args.halonumber,
+            free_param_value=args.ftag,
+            output_prefix=output_prefix,
+            mergers=not args.no_mergers,
+        )
+    elif args.recursive:
         output_prefix = args.output_prefix or f'{sim_name}_tagged_recursive'
         dfs, _ = angmom_tag_multi_instance_recursive(
             sim,
@@ -66,6 +85,7 @@ def main():
             free_param_value=args.ftag,
             output_prefix=output_prefix,
             mergers=not args.no_mergers,
+            cluster_file=args.cluster_file,
         )
         filenames = [os.path.join(output_prefix, f"instance_{k:03d}.csv") for k in range(args.n_instances)]
     else:
@@ -78,6 +98,7 @@ def main():
             output_prefix=output_prefix,
             mergers=not args.no_mergers,
             occupation_frac=args.occupation_frac,
+            cluster_file=args.cluster_file,
         )
 
     print(f'\nSaved {len(filenames)} files:')

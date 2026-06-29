@@ -32,7 +32,9 @@ def main():
     parser.add_argument('--output-dir', type=str, default=None,
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
-                        help='Disable DBSCAN clustering when calculating reffs')
+                        help='Disable voxel clustering when calculating reffs')
+    parser.add_argument('--voxel-fraction', type=float, default=0.05,
+                        help='Voxel size as fraction of r200c for clustering (default: 0.05)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     args = parser.parse_args()
@@ -57,6 +59,7 @@ def main():
         output_dir=args.output_dir,
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
+        voxel_fraction=args.voxel_fraction,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'
