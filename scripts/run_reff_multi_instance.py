@@ -35,6 +35,8 @@ def main():
                         help='Disable voxel clustering when calculating reffs')
     parser.add_argument('--voxel-fraction', type=float, default=0.05,
                         help='Voxel size as fraction of r200c for clustering (default: 0.05)')
+    parser.add_argument('--max-radius-frac', type=float, default=0.1,
+                        help='After voxel centering, keep only particles within this fraction of r200c (default: 0.1). Set 0 to disable.')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     args = parser.parse_args()
@@ -60,6 +62,7 @@ def main():
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
         voxel_fraction=args.voxel_fraction,
+        max_radius_frac=args.max_radius_frac if args.max_radius_frac > 0 else None,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'

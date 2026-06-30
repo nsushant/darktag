@@ -507,6 +507,7 @@ def calculate_reffs_multi_instance(
     use_clustering=True,
     use_ahf=False,
     voxel_fraction=0.05,
+    max_radius_frac=0.1,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -525,6 +526,9 @@ def calculate_reffs_multi_instance(
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
         voxel_fraction    - voxel size as fraction of r200c (default 0.05)
+        max_radius_frac   - after voxel centering, apply a 3D radial cut keeping only
+                            particles within max_radius_frac * r200c of the cluster centre.
+                            Set to None to disable. (default 0.1)
 
     Returns:
         list of reff DataFrames, one per instance
@@ -726,11 +730,17 @@ def calculate_reffs_multi_instance(
                 )
                 if mask_k is None or mask_k.sum() == 0:
                     continue
-                particle_sel_k  = particle_sel_k[mask_k]
+                particle_sel_k    = particle_sel_k[mask_k]
                 PrevVoxelIords[k] = np.asarray(particle_sel_k['iord'])
+                # keep only insitu particles that are inside the voxel cluster
+                if len(parts_insitu_k) > 0:
+                    parts_insitu_k = parts_insitu_k[
+                        np.isin(parts_insitu_k['iord'], particle_sel_k['iord'])
+                    ]
 
             masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 
+            # Centre on the voxel cluster (insitu if available, else all tagged)
             if len(parts_insitu_k) > 0:
                 masses_insitu_k = [data_insitu_k.loc[iord]['mstar'] for iord in parts_insitu_k['iord']]
                 cen_stars_k = calc_3D_cm(parts_insitu_k, masses_insitu_k)
@@ -738,6 +748,18 @@ def calculate_reffs_multi_instance(
                 cen_stars_k = calc_3D_cm(particle_sel_k, masses_k)
 
             particle_sel_k['pos'] -= cen_stars_k
+
+            # Radial cut around the voxel cluster centre
+            if max_radius_frac is not None and max_radius_frac > 0:
+                max_r = float(r200c_pyn) * max_radius_frac
+                r3d_k = np.sqrt(particle_sel_k['x']**2
+                                + particle_sel_k['y']**2
+                                + particle_sel_k['z']**2)
+                particle_sel_k = particle_sel_k[r3d_k <= max_r]
+                if len(particle_sel_k) == 0:
+                    particle_sel_k['pos'] += cen_stars_k
+                    continue
+                masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 
             distances_k = np.sqrt(particle_sel_k['x']**2 + particle_sel_k['y']**2)
             idxs_sorted = np.argsort(distances_k)
