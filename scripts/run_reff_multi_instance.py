@@ -33,8 +33,8 @@ def main():
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
                         help='Disable voxel clustering when calculating reffs')
-    parser.add_argument('--voxel-fraction', type=float, default=0.05,
-                        help='Voxel size as fraction of r200c for clustering (default: 0.05)')
+    parser.add_argument('--voxel-size', type=float, default=2.0,
+                        help='Voxel edge length in kpc (default: 2.0)')
     parser.add_argument('--max-radius-frac', type=float, default=0.1,
                         help='After voxel centering, keep only particles within this fraction of r200c (default: 0.1). Set 0 to disable.')
     parser.add_argument('--ahf', action='store_true', default=False,
@@ -61,7 +61,7 @@ def main():
         output_dir=args.output_dir,
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
-        voxel_fraction=args.voxel_fraction,
+        voxel_size_kpc=args.voxel_size,
         max_radius_frac=args.max_radius_frac if args.max_radius_frac > 0 else None,
     )
 

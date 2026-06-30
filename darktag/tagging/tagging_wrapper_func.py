@@ -506,7 +506,7 @@ def calculate_reffs_multi_instance(
     save_to_file=True,
     use_clustering=True,
     use_ahf=False,
-    voxel_fraction=0.05,
+    voxel_size_kpc=2.0,
     max_radius_frac=0.1,
 ):
     '''
@@ -525,7 +525,7 @@ def calculate_reffs_multi_instance(
         halo_number       - halo number (default 0)
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
-        voxel_fraction    - voxel size as fraction of r200c (default 0.05)
+        voxel_size_kpc    - voxel edge length in kpc (default 2.0)
         max_radius_frac   - after voxel centering, apply a 3D radial cut keeping only
                             particles within max_radius_frac * r200c of the cluster centre.
                             Set to None to disable. (default 0.1)
@@ -723,7 +723,7 @@ def calculate_reffs_multi_instance(
             if use_clustering:
                 pos_k    = np.array(particle_sel_k['pos'])
                 iords_k  = np.asarray(particle_sel_k['iord'])
-                vox_size = float(r200c_pyn) * voxel_fraction
+                vox_size = float(voxel_size_kpc)
                 mask_k   = _voxel_pick_cluster(
                     pos_k, iords_k, vox_size,
                     prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
