@@ -198,17 +198,22 @@ def main():
             done = set(f.keys())
             if done:
                 outputs_reversed = outputs[::-1]
+                # Find the earliest processed snapshot (highest idx in outputs_reversed)
+                last_done   = None
+                resume_from = None
                 for idx, out in enumerate(outputs_reversed):
                     if out in done:
                         last_done   = out
                         resume_from = idx + 1
-                        grp = f[last_done]
+                        # keep scanning — we want the last match (earliest time)
+                if last_done is not None:
+                    with h5py.File(output_path, 'r') as f2:
+                        grp = f2[last_done]
                         for branch_id in grp.keys():
                             active_branches[branch_id] = {
                                 'prev_iords':   grp[branch_id]['iords'][:],
                                 'prev_halonum': int(grp[branch_id]['halonum'][()]),
                             }
-                        break
         print(f'Resuming from after {last_done} — {len(active_branches)} active branches')
 
     # ── Main loop (z=0 first) ─────────────────────────────────────────────────

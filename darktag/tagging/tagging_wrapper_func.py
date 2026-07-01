@@ -846,6 +846,7 @@ def calculate_reffs_hydro_stars(
     voxel_size_kpc=0.08,
     max_degree=20,
     size_jump=2.0,
+    track_cluster_file=None,
 ):
     '''
     Calculate half-light and half-mass radii directly from HYDRO stellar particles.
@@ -882,6 +883,18 @@ def calculate_reffs_hydro_stars(
     simname = HYDROsim.path
     if output_fname is None:
         output_fname = simname.replace('/', '_') + '_hydro_reffs.csv'
+
+    # Load track_cluster HDF5 if supplied
+    _tc_halonum_map = None
+    if track_cluster_file is not None:
+        import h5py as _h5py
+        _tc_data = {}
+        with _h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = int(f[snap]['main']['halonum'][()])
+        _tc_halonum_map = _tc_data
+        print(f'Loaded track_cluster file: {len(_tc_halonum_map)} snapshots, using AHF halonums')
 
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halo_number + 1)
 
@@ -947,7 +960,11 @@ def calculate_reffs_hydro_stars(
                 print(f'  etp correction failed ({e}), continuing without')
 
         try:
-            if use_ahf:
+            if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+                pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
+                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+            elif use_ahf:
+                pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
                 h = HYDROparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
             else:
                 hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)

@@ -75,6 +75,7 @@ def main():
             free_param_value=args.ftag,
             output_prefix=output_prefix,
             mergers=not args.no_mergers,
+            track_cluster_file=args.track_cluster_file,
         )
 
     print(f'\nSaved {len(filenames)} files:')

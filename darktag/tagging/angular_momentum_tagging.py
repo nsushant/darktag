@@ -786,6 +786,7 @@ def angmom_tag_multi_instance_hydro_dm(
     free_param_value=0.01,
     output_prefix=None,
     mergers=True,
+    track_cluster_file=None,
 ):
     '''
     Multi-instance angular momentum tagging on HYDRO simulation DM particles using DarkLight.
@@ -808,6 +809,23 @@ def angmom_tag_multi_instance_hydro_dm(
 
     DMOname = HYDROsim.path
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halonumber)
+
+    # Load track_cluster HDF5 if supplied — provides AHF halonums + cluster iords
+    _tc_halonum_map   = None
+    cluster_iords_map = None
+    if track_cluster_file is not None:
+        import h5py
+        _tc_data = {}
+        with h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = {
+                        'halonum': int(f[snap]['main']['halonum'][()]),
+                        'iords':   f[snap]['main']['iords'][:],
+                    }
+        _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
+        cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
+        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
 
     print(f'Running DarkLight (DMO=False) {n_instances} time(s) for main halo...')
     dl_histories = [
@@ -868,7 +886,10 @@ def angmom_tag_multi_instance_hydro_dm(
             print(f'--> failed to load snapshot: {e}, skipping')
             continue
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+        if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
         if any(m > 0 for m in mass_selects_insitu):
             try:
@@ -878,7 +899,10 @@ def angmom_tag_multi_instance_hydro_dm(
                 del HYDROparticles
                 continue
 
-            h = HYDROparticles.halos()[int(halonums[i]) - 1]
+            if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+            else:
+                h = HYDROparticles.halos()[int(halonums[i]) - 1]
             pynbody.analysis.halo.center(h)
 
             try:
@@ -895,6 +919,9 @@ def angmom_tag_multi_instance_hydro_dm(
                      + HYDROparticles.dm['pos'][:, 1] ** 2
                      + HYDROparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
             ]
+
+            if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+                dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
 
             parts_sorted_angmom = rank_order_particles_by_angmom(dm_within)
             del dm_within
@@ -977,6 +1004,7 @@ def angmom_tag_multi_instance_hydro_mstars(
     halonumber=1,
     free_param_value=0.01,
     output_prefix=None,
+    track_cluster_file=None,
 ):
     '''
     Multi-instance angular momentum tagging on HYDRO DM particles using the actual
@@ -1000,6 +1028,23 @@ def angmom_tag_multi_instance_hydro_mstars(
 
     DMOname = HYDROsim.path
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halonumber)
+
+    # Load track_cluster HDF5 if supplied — provides AHF halonums + cluster iords
+    _tc_halonum_map   = None
+    cluster_iords_map = None
+    if track_cluster_file is not None:
+        import h5py
+        _tc_data = {}
+        with h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = {
+                        'halonum': int(f[snap]['main']['halonum'][()]),
+                        'iords':   f[snap]['main']['iords'][:],
+                    }
+        _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
+        cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
+        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
 
     # Stellar mass history from HYDRO SFR histogram
     mstar_array, t_sfr = integrate_sfr(main_halo["SFR_histogram"], t_all[-1])
@@ -1047,9 +1092,12 @@ def angmom_tag_multi_instance_hydro_mstars(
             print(f'--> failed to load snapshot: {e}, skipping')
             continue
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-
-        h = HYDROparticles.halos()[int(halonums[i]) - 1]
+        if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+            h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+            h = HYDROparticles.halos()[int(halonums[i]) - 1]
         pynbody.analysis.halo.center(h)
 
         try:
@@ -1065,6 +1113,9 @@ def angmom_tag_multi_instance_hydro_mstars(
                  + HYDROparticles.dm['pos'][:, 1] ** 2
                  + HYDROparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
         ]
+
+        if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+            dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
 
         parts_sorted_angmom = rank_order_particles_by_angmom(dm_within)
         del dm_within

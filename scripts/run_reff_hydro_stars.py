@@ -47,6 +47,8 @@ def main():
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--db-name', type=str, default=None,
                         help='Tangos DB filename stem (default: first _-delimited token of sim_name)')
+    parser.add_argument('--track-cluster-file', type=str, default=None,
+                        help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums')
     args = parser.parse_args()
 
     sim_name     = args.sim_name
@@ -69,6 +71,7 @@ def main():
         voxel_size_kpc=args.voxel_size,
         max_degree=args.max_degree,
         size_jump=args.size_jump,
+        track_cluster_file=args.track_cluster_file,
     )
 
     print(f'\nDone. Wrote {len(df)} snapshots to {output_csv}')
