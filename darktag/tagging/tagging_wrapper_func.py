@@ -5,43 +5,12 @@ from .clustering import cluster_tagged_particles
 from ..analysis.calculate import calc_3D_cm, produce_lums_grouped, calc_halflight
 
 
-def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None):
+def _voxel_union_find(voxel_dict, degree):
     """
-    Voxel-based spatial clustering on a set of particles.
-
-    Snaps each particle to a 3-D grid, then builds connected components via
-    26-neighbour union-find on occupied voxels.  Returns a boolean mask
-    selecting the best cluster.
-
-    Parameters
-    ----------
-    positions  : (N, 3) float array – particle positions in physical units (kpc)
-    iords      : (N,)  int array   – particle Iord values
-    voxel_size : float             – voxel edge length (same units as positions)
-    prev_iords : array-like or None – iords from previous snapshot;
-                                      if given, pick cluster with most overlap;
-                                      if None, pick largest cluster
-
-    Returns
-    -------
-    mask : (N,) bool array, or None if no particles / no cluster found
+    Run union-find on occupied voxels with connectivity radius `degree`.
+    Two voxels are connected if they are within ±degree steps in all axes.
+    Returns a dict mapping each particle index to its cluster root.
     """
-    if len(positions) == 0:
-        return None
-
-    vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
-    vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
-    vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
-
-    # voxel key → list of particle indices
-    voxel_dict = {}
-    for idx in range(len(iords)):
-        key = (vx[idx], vy[idx], vz[idx])
-        if key not in voxel_dict:
-            voxel_dict[key] = []
-        voxel_dict[key].append(idx)
-
-    # Union-Find with path compression
     parent = {k: k for k in voxel_dict}
 
     def find(x):
@@ -56,17 +25,17 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None):
             parent[rb] = ra
 
     key_set = set(voxel_dict)
+    rng = range(-degree, degree + 1)
     for (x, y, z) in list(voxel_dict):
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                for dz in (-1, 0, 1):
+        for dx in rng:
+            for dy in rng:
+                for dz in rng:
                     if dx == dy == dz == 0:
                         continue
                     nb = (x + dx, y + dy, z + dz)
                     if nb in key_set:
                         union((x, y, z), nb)
 
-    # group particle indices by cluster root
     clusters = {}
     for key, idxs in voxel_dict.items():
         root = find(key)
@@ -74,18 +43,87 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None):
             clusters[root] = []
         clusters[root].extend(idxs)
 
-    if not clusters:
+    return clusters
+
+
+def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
+                        max_degree=20, size_jump=2.0):
+    """
+    Iterative voxel clustering.
+
+    Starts with degree=1 (adjacent voxels only) and increases the connectivity
+    radius one step at a time.  At each degree the tracked cluster grows by
+    absorbing neighbouring particles.  Iteration stops when:
+      - the cluster size stops changing (galaxy fully stitched), OR
+      - the cluster size jumps by more than `size_jump` × (satellite absorbed).
+    The cluster from the last stable degree is returned.
+
+    Parameters
+    ----------
+    positions   : (N, 3) float array – positions in kpc
+    iords       : (N,)  int array
+    voxel_size  : float – voxel edge in kpc (e.g. 0.08)
+    prev_iords  : array-like or None – iords from previous snapshot for overlap tracking
+    max_degree  : int   – maximum connectivity radius in voxel steps (default 20)
+    size_jump   : float – ratio threshold that signals satellite absorption (default 2.0)
+
+    Returns
+    -------
+    mask : (N,) bool array, or None if no particles found
+    """
+    if len(positions) == 0:
         return None
 
-    if prev_iords is not None and len(prev_iords) > 0:
-        prev_set = set(prev_iords)
-        best_root = max(clusters,
-                        key=lambda r: sum(1 for idx in clusters[r] if iords[idx] in prev_set))
-    else:
-        best_root = max(clusters, key=lambda r: len(clusters[r]))
+    vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
+    vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
+    vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
+
+    voxel_dict = {}
+    for idx in range(len(iords)):
+        key = (vx[idx], vy[idx], vz[idx])
+        if key not in voxel_dict:
+            voxel_dict[key] = []
+        voxel_dict[key].append(idx)
+
+    prev_set = set(prev_iords) if (prev_iords is not None and len(prev_iords) > 0) else None
+
+    def _pick(clusters):
+        if prev_set:
+            return max(clusters,
+                       key=lambda r: sum(1 for idx in clusters[r] if iords[idx] in prev_set))
+        return max(clusters, key=lambda r: len(clusters[r]))
+
+    best_idxs = None
+    prev_size = 0
+
+    for degree in range(1, max_degree + 1):
+        clusters = _voxel_union_find(voxel_dict, degree)
+        root = _pick(clusters)
+        curr_idxs = clusters[root]
+        curr_size = len(curr_idxs)
+
+        if prev_size > 0 and curr_size >= prev_size * size_jump:
+            # satellite absorbed — roll back to previous degree
+            print(f'    voxel iter: degree {degree} caused size jump '
+                  f'{prev_size}→{curr_size} (×{curr_size/prev_size:.1f}), '
+                  f'stopping at degree {degree - 1}')
+            break
+
+        best_idxs = curr_idxs
+
+        if curr_size == prev_size:
+            # cluster fully stabilised
+            print(f'    voxel iter: stabilised at degree {degree} '
+                  f'with {curr_size} particles')
+            break
+
+        prev_size = curr_size
+
+    if best_idxs is None:
+        return None
 
     mask = np.zeros(len(iords), dtype=bool)
-    for idx in clusters[best_root]:
+    for idx in best_idxs:
         mask[idx] = True
     return mask
 
@@ -506,8 +544,9 @@ def calculate_reffs_multi_instance(
     save_to_file=True,
     use_clustering=True,
     use_ahf=False,
-    voxel_size_kpc=2.0,
-    max_radius_frac=0.1,
+    voxel_size_kpc=0.08,
+    max_degree=20,
+    size_jump=2.0,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -525,10 +564,9 @@ def calculate_reffs_multi_instance(
         halo_number       - halo number (default 0)
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
-        voxel_size_kpc    - voxel edge length in kpc (default 2.0)
-        max_radius_frac   - after voxel centering, apply a 3D radial cut keeping only
-                            particles within max_radius_frac * r200c of the cluster centre.
-                            Set to None to disable. (default 0.1)
+        voxel_size_kpc    - voxel edge length in kpc (default 0.08)
+        max_degree        - maximum connectivity radius in voxel steps (default 20)
+        size_jump         - cluster size ratio that signals satellite absorption (default 2.0)
 
     Returns:
         list of reff DataFrames, one per instance
@@ -721,18 +759,19 @@ def calculate_reffs_multi_instance(
 
             # Voxel clustering with this instance's own PrevVoxelIords
             if use_clustering:
-                pos_k    = np.array(particle_sel_k['pos'])
-                iords_k  = np.asarray(particle_sel_k['iord'])
-                vox_size = float(voxel_size_kpc)
-                mask_k   = _voxel_pick_cluster(
-                    pos_k, iords_k, vox_size,
+                pos_k   = np.array(particle_sel_k['pos'])
+                iords_k = np.asarray(particle_sel_k['iord'])
+                mask_k  = _voxel_pick_cluster(
+                    pos_k, iords_k, float(voxel_size_kpc),
                     prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
+                    max_degree=max_degree,
+                    size_jump=size_jump,
                 )
                 if mask_k is None or mask_k.sum() == 0:
                     continue
                 particle_sel_k    = particle_sel_k[mask_k]
                 PrevVoxelIords[k] = np.asarray(particle_sel_k['iord'])
-                # keep only insitu particles that are inside the voxel cluster
+                # restrict insitu to the cluster
                 if len(parts_insitu_k) > 0:
                     parts_insitu_k = parts_insitu_k[
                         np.isin(parts_insitu_k['iord'], particle_sel_k['iord'])
@@ -740,7 +779,7 @@ def calculate_reffs_multi_instance(
 
             masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 
-            # Centre on the voxel cluster (insitu if available, else all tagged)
+            # Centre on the cluster (insitu if available, else all tagged)
             if len(parts_insitu_k) > 0:
                 masses_insitu_k = [data_insitu_k.loc[iord]['mstar'] for iord in parts_insitu_k['iord']]
                 cen_stars_k = calc_3D_cm(parts_insitu_k, masses_insitu_k)
@@ -748,18 +787,6 @@ def calculate_reffs_multi_instance(
                 cen_stars_k = calc_3D_cm(particle_sel_k, masses_k)
 
             particle_sel_k['pos'] -= cen_stars_k
-
-            # Radial cut around the voxel cluster centre
-            if max_radius_frac is not None and max_radius_frac > 0:
-                max_r = float(r200c_pyn) * max_radius_frac
-                r3d_k = np.sqrt(particle_sel_k['x']**2
-                                + particle_sel_k['y']**2
-                                + particle_sel_k['z']**2)
-                particle_sel_k = particle_sel_k[r3d_k <= max_r]
-                if len(particle_sel_k) == 0:
-                    particle_sel_k['pos'] += cen_stars_k
-                    continue
-                masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
 
             distances_k = np.sqrt(particle_sel_k['x']**2 + particle_sel_k['y']**2)
             idxs_sorted = np.argsort(distances_k)

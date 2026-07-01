@@ -33,10 +33,12 @@ def main():
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
                         help='Disable voxel clustering when calculating reffs')
-    parser.add_argument('--voxel-size', type=float, default=2.0,
-                        help='Voxel edge length in kpc (default: 2.0)')
-    parser.add_argument('--max-radius-frac', type=float, default=0.1,
-                        help='After voxel centering, keep only particles within this fraction of r200c (default: 0.1). Set 0 to disable.')
+    parser.add_argument('--voxel-size', type=float, default=0.08,
+                        help='Voxel edge length in kpc (default: 0.08)')
+    parser.add_argument('--max-degree', type=int, default=20,
+                        help='Max voxel connectivity radius in steps (default: 20)')
+    parser.add_argument('--size-jump', type=float, default=2.0,
+                        help='Cluster size ratio that signals satellite absorption (default: 2.0)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     args = parser.parse_args()
@@ -62,7 +64,8 @@ def main():
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
         voxel_size_kpc=args.voxel_size,
-        max_radius_frac=args.max_radius_frac if args.max_radius_frac > 0 else None,
+        max_degree=args.max_degree,
+        size_jump=args.size_jump,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'
