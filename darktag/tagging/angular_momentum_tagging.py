@@ -496,6 +496,7 @@ def angmom_tag_multi_instance(
     AHF_centers_file=None,
     occupation_frac='all',
     cluster_file=None,
+    track_cluster_file=None,
 ):
     '''
     Runs n_instances independent DarkLight realisations over the full simulation,
@@ -524,7 +525,22 @@ def angmom_tag_multi_instance(
 
     # Load cluster iords lookup from HDF5 if supplied
     cluster_iords_map = None
-    if cluster_file is not None:
+    _tc_halonum_map   = None   # {snap: int halonum} populated from track_cluster_file
+
+    if track_cluster_file is not None:
+        import h5py
+        _tc_data = {}
+        with h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = {
+                        'halonum': int(f[snap]['main']['halonum'][()]),
+                        'iords':   f[snap]['main']['iords'][:],
+                    }
+        _tc_halonum_map  = {s: d['halonum'] for s, d in _tc_data.items()}
+        cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
+        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+    elif cluster_file is not None:
         import h5py
         with h5py.File(cluster_file, 'r') as f:
             cluster_iords_map = {k: f[k][:] for k in f.keys()}
@@ -617,7 +633,11 @@ def angmom_tag_multi_instance(
 
             subhalo_iords = np.array([])
 
-            if AHF_centers_file is None:
+            if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                ahf_num = _tc_halonum_map[outputs[i]]
+                h = DMOparticles.halos(halo_numbers="v1")[int(ahf_num)]
+            elif AHF_centers_file is None:
                 h = DMOparticles.halos()[int(halonums[i]) - 1]
             else:
                 pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]

@@ -5,58 +5,14 @@ from .clustering import cluster_tagged_particles
 from ..analysis.calculate import calc_3D_cm, produce_lums_grouped, calc_halflight
 
 
-def _voxel_union_find(voxel_dict, degree):
-    """
-    Run union-find on occupied voxels with connectivity radius `degree`.
-    Two voxels are connected if they are within ±degree steps in all axes.
-    Returns a dict mapping each particle index to its cluster root.
-    """
-    parent = {k: k for k in voxel_dict}
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[rb] = ra
-
-    key_set = set(voxel_dict)
-    rng = range(-degree, degree + 1)
-    for (x, y, z) in list(voxel_dict):
-        for dx in rng:
-            for dy in rng:
-                for dz in rng:
-                    if dx == dy == dz == 0:
-                        continue
-                    nb = (x + dx, y + dy, z + dz)
-                    if nb in key_set:
-                        union((x, y, z), nb)
-
-    clusters = {}
-    for key, idxs in voxel_dict.items():
-        root = find(key)
-        if root not in clusters:
-            clusters[root] = []
-        clusters[root].extend(idxs)
-
-    return clusters
-
-
 def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
                         max_degree=20, size_jump=2.0):
     """
-    Iterative voxel clustering.
+    Iterative voxel clustering using scipy.ndimage.label (C-level, no Python loops).
 
-    Starts with degree=1 (adjacent voxels only) and increases the connectivity
-    radius one step at a time.  At each degree the tracked cluster grows by
-    absorbing neighbouring particles.  Iteration stops when:
-      - the cluster size stops changing (galaxy fully stitched), OR
-      - the cluster size jumps by more than `size_jump` × (satellite absorbed).
-    The cluster from the last stable degree is returned.
+    Builds a 3D boolean grid from voxelised positions, then for degree=1..max_degree
+    calls ndimage.label with an all-ones structuring element of size (2D+1)^3.
+    Stops when the main cluster stabilises or a size jump signals satellite absorption.
 
     Parameters
     ----------
@@ -71,6 +27,8 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     -------
     mask : (N,) bool array, or None if no particles found
     """
+    from scipy.ndimage import label as ndimage_label
+
     if len(positions) == 0:
         return None
 
@@ -78,54 +36,72 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
     vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
 
-    voxel_dict = {}
-    for idx in range(len(iords)):
-        key = (vx[idx], vy[idx], vz[idx])
-        if key not in voxel_dict:
-            voxel_dict[key] = []
-        voxel_dict[key].append(idx)
+    # Shift to zero-based indices
+    ox, oy, oz = vx.min(), vy.min(), vz.min()
+    gx = vx - ox
+    gy = vy - oy
+    gz = vz - oz
 
-    prev_set = set(prev_iords) if (prev_iords is not None and len(prev_iords) > 0) else None
+    nx, ny, nz = int(gx.max()) + 1, int(gy.max()) + 1, int(gz.max()) + 1
 
-    def _pick(clusters):
-        if prev_set:
-            return max(clusters,
-                       key=lambda r: sum(1 for idx in clusters[r] if iords[idx] in prev_set))
-        return max(clusters, key=lambda r: len(clusters[r]))
+    # Build boolean occupancy grid — fully vectorised, no Python loop
+    grid = np.zeros((nx, ny, nz), dtype=bool)
+    grid[gx, gy, gz] = True
 
-    best_idxs = None
+    # Precompute prev_iord mask as a boolean array aligned to iords
+    if prev_iords is not None and len(prev_iords) > 0:
+        prev_set = set(prev_iords)
+        prev_mask = np.array([iord in prev_set for iord in iords], dtype=bool)
+    else:
+        prev_mask = None
+
+    best_mask = None
     prev_size = 0
 
     for degree in range(1, max_degree + 1):
-        clusters = _voxel_union_find(voxel_dict, degree)
-        root = _pick(clusters)
-        curr_idxs = clusters[root]
-        curr_size = len(curr_idxs)
+        s = 2 * degree + 1
+        structure = np.ones((s, s, s), dtype=bool)
+        labeled, n_clusters = ndimage_label(grid, structure=structure)
+
+        if n_clusters == 0:
+            break
+
+        # Per-particle labels — vectorised index into label array
+        particle_labels = labeled[gx, gy, gz]
+
+        # Count particles per label
+        label_counts = np.bincount(particle_labels, minlength=n_clusters + 1)
+        label_counts[0] = 0  # ignore background
+
+        if prev_mask is not None:
+            # Count prev-snapshot overlap per label — vectorised with bincount
+            prev_labels = particle_labels[prev_mask]
+            label_overlap = np.bincount(prev_labels, minlength=n_clusters + 1)
+            label_overlap[0] = 0
+            main_label = int(label_overlap.argmax()) if label_overlap.max() > 0 else int(label_counts.argmax())
+        else:
+            main_label = int(label_counts.argmax())
+
+        curr_size = int(label_counts[main_label])
 
         if prev_size > 0 and curr_size >= prev_size * size_jump:
-            # satellite absorbed — roll back to previous degree
             print(f'    voxel iter: degree {degree} caused size jump '
                   f'{prev_size}→{curr_size} (×{curr_size/prev_size:.1f}), '
                   f'stopping at degree {degree - 1}')
             break
 
-        best_idxs = curr_idxs
+        # Build particle mask for this label
+        curr_mask = labeled[gx, gy, gz] == main_label
+        best_mask = curr_mask
 
         if curr_size == prev_size:
-            # cluster fully stabilised
             print(f'    voxel iter: stabilised at degree {degree} '
                   f'with {curr_size} particles')
             break
 
         prev_size = curr_size
 
-    if best_idxs is None:
-        return None
-
-    mask = np.zeros(len(iords), dtype=bool)
-    for idx in best_idxs:
-        mask[idx] = True
-    return mask
+    return best_mask
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
 
@@ -547,6 +523,7 @@ def calculate_reffs_multi_instance(
     voxel_size_kpc=0.08,
     max_degree=20,
     size_jump=2.0,
+    track_cluster_file=None,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -588,21 +565,36 @@ def calculate_reffs_multi_instance(
     n_instances = len(instance_files)
     print(f'Found {n_instances} instance files in {tagged_dir}')
 
-    # AHF setup
-    AHF_halonums = None
-    if path_AHF_halonums is None:
-        pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+    # AHF setup — track_cluster_file supersedes path_AHF_halonums when provided
+    if track_cluster_file is not None:
+        import h5py
+        _tc_rows = []
+        with h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_rows.append({
+                        'snapshot':    snap,
+                        'AHF halonum': int(f[snap]['main']['halonum'][()]),
+                    })
+        AHF_halonums = pd.DataFrame(_tc_rows)
+        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        AHF_centers  = None
+        print(f'Loaded track_cluster file: {len(AHF_halonums)} snapshots, using AHF halonums')
     else:
-        if os.path.isfile(path_AHF_halonums):
-            AHF_halonums = pd.read_csv(path_AHF_halonums)
-            if len(AHF_halonums['snapshot']) > 0:
-                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        AHF_halonums = None
+        if path_AHF_halonums is None:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+        else:
+            if os.path.isfile(path_AHF_halonums):
+                AHF_halonums = pd.read_csv(path_AHF_halonums)
+                if len(AHF_halonums['snapshot']) > 0:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                else:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
             else:
                 pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-        else:
-            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
-    AHF_centers = pd.read_csv(str(path_AHF_halonums)) if AHF_centers_supplied else None
+        AHF_centers = pd.read_csv(str(path_AHF_halonums)) if AHF_centers_supplied else None
 
     # Tangos indexing (shared across all instances)
     simname = DMOsim.path

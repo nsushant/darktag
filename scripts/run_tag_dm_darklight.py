@@ -43,6 +43,8 @@ def main():
                         help='Prefix for output filenames')
     parser.add_argument('--db-name', type=str, default=None,
                         help='Tangos DB filename stem (default: first _-delimited token of sim_name, e.g. Halo1459)')
+    parser.add_argument('--track-cluster-file', type=str, default=None,
+                        help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums + cluster iords')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
@@ -62,6 +64,7 @@ def main():
             free_param_value=args.ftag,
             output_prefix=output_prefix,
             mergers=not args.no_mergers,
+            track_cluster_file=args.track_cluster_file,
         )
     else:
         output_prefix = args.output_prefix or f'{sim_name}_tagged_dm_hydro'
