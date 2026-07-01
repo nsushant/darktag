@@ -43,6 +43,8 @@ def main():
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--track-cluster-file', type=str, default=None,
                         help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums')
+    parser.add_argument('--max-instances', type=int, default=None,
+                        help='Only process the first N instance files (useful for testing)')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
@@ -69,6 +71,7 @@ def main():
         max_degree=args.max_degree,
         size_jump=args.size_jump,
         track_cluster_file=args.track_cluster_file,
+        max_instances=args.max_instances,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'

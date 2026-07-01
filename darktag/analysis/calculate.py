@@ -344,7 +344,7 @@ def produce_lums_grouped(df,present_iords,t_snap):
 
     lums_df = df.groupby(['iords']).sum()['lums']
 
-    lums_for_part = np.asarray([lums_df.loc[iord] for iord in present_iords])
+    lums_for_part = lums_df.loc[present_iords].values
     '''
     for particle_id_tag in present_iords:
 

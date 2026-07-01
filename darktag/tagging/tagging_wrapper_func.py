@@ -529,6 +529,7 @@ def calculate_reffs_multi_instance(
     max_degree=20,
     size_jump=2.0,
     track_cluster_file=None,
+    max_instances=None,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -567,6 +568,8 @@ def calculate_reffs_multi_instance(
     ])
     if len(instance_files) == 0:
         raise FileNotFoundError(f'No instance_*.csv files found in {tagged_dir}')
+    if max_instances is not None:
+        instance_files = instance_files[:max_instances]
     n_instances = len(instance_files)
     print(f'Found {n_instances} instance files in {tagged_dir}')
 
@@ -708,7 +711,6 @@ def calculate_reffs_multi_instance(
             children_dm, children_st, sub_halonums = get_child_iords(h, halo_cat, DMO_state='DMO')
             DMOparticles.physical_units()
             pynbody.analysis.halo.center(h)
-            pynbody.analysis.angmom.faceon(h.dm)
         except Exception as e:
             print('centering data unavailable', e)
             continue
@@ -776,28 +778,31 @@ def calculate_reffs_multi_instance(
                         np.isin(parts_insitu_k['iord'], particle_sel_k['iord'])
                     ]
 
-            masses_k = [data_grouped_k.loc[n]['mstar'] for n in particle_sel_k['iord']]
+            iords_k_arr = np.asarray(particle_sel_k['iord'])
+            masses_k = data_grouped_k.loc[iords_k_arr, 'mstar'].values
 
             # Centre on the cluster (insitu if available, else all tagged)
             if len(parts_insitu_k) > 0:
-                masses_insitu_k = [data_insitu_k.loc[iord]['mstar'] for iord in parts_insitu_k['iord']]
+                insitu_iords_arr = np.asarray(parts_insitu_k['iord'])
+                masses_insitu_k = data_insitu_k.loc[insitu_iords_arr, 'mstar'].values
                 cen_stars_k = calc_3D_cm(parts_insitu_k, masses_insitu_k)
             else:
                 cen_stars_k = calc_3D_cm(particle_sel_k, masses_k)
 
             particle_sel_k['pos'] -= cen_stars_k
 
-            distances_k = np.sqrt(particle_sel_k['x']**2 + particle_sel_k['y']**2)
-            idxs_sorted = np.argsort(distances_k)
-            sorted_dists = np.sort(distances_k)
-            dist_ordered_iords = np.asarray(particle_sel_k['iord'][idxs_sorted])
-
-            sorted_masses_k = [data_grouped_k.loc[n]['mstar'] for n in dist_ordered_iords]
+            distances_k = np.sqrt(np.array(particle_sel_k['x'])**2 + np.array(particle_sel_k['y'])**2)
+            sort_idx_k  = np.argsort(distances_k)
+            sorted_dists_k = distances_k[sort_idx_k]
+            sorted_masses_k = masses_k[sort_idx_k]
             cumsum_k = np.cumsum(sorted_masses_k)
-            R_half_k = sorted_dists[np.where(cumsum_k >= (cumsum_k[-1] / 2))[0][0]]
+            R_half_k = float(sorted_dists_k[np.searchsorted(cumsum_k, cumsum_k[-1] * 0.5)])
 
-            lum_k = produce_lums_grouped(dt_all_k, particle_sel_k['iord'], t_val)
-            hlight_k = calc_halflight(particle_sel_k, lum_k, band='v', cylindrical=True)
+            lum_k = produce_lums_grouped(dt_all_k, iords_k_arr, t_val)
+            # halflight via cumsum (replaces slow iterative pynbody LowPass binary search)
+            lum_sort_k = lum_k[sort_idx_k]
+            cumsum_lum_k = np.cumsum(lum_sort_k)
+            hlight_k = float(sorted_dists_k[np.searchsorted(cumsum_lum_k, cumsum_lum_k[-1] * 0.5)]) if cumsum_lum_k[-1] > 0 else float('nan')
 
             particle_sel_k['pos'] += cen_stars_k
 
