@@ -139,8 +139,8 @@ def main():
 
     parser = argparse.ArgumentParser(description='Voxel merger tree tracker for DMO/HYDRO simulations')
     parser.add_argument('sim_name', help='Simulation name (e.g. Halo1459_DMO or Halo1459_HYDRO_Mreionx02)')
-    parser.add_argument('--halonumber', type=int, default=0,
-                        help='HOP halo index at z=0 to seed main branch (default: 0)')
+    parser.add_argument('--halonumber', type=int, default=1,
+                        help='Halo index at z=0 to seed main branch (default: 1)')
     parser.add_argument('--voxel-size', type=float, default=0.5,
                         help='Fixed voxel edge length in kpc (default: 0.5)')
     parser.add_argument('--max-degree', type=int, default=20,
@@ -234,19 +234,28 @@ def main():
                 print(f'  Failed to load halo catalogue: {e}, skipping')
                 continue
 
-            # ── SEED at z=0 ───────────────────────────────────────────────────
+            # ── SEED at z=0 (first snapshot only) ────────────────────────────
             if not active_branches:
+                if output != outputs_reversed[0]:
+                    # Seeding failed at z=0 — don't retry on earlier snaps
+                    print(f'  Seed not established at z=0, skipping')
+                    del snap
+                    continue
+
                 try:
                     h = halo_cat[halonumber]
                 except Exception as e:
-                    print(f'  Could not load halo {halonumber}: {e}, skipping')
-                    continue
+                    print(f'  Could not load halo {halonumber}: {e}')
+                    print(f'  Tip: for AHF use --halonumber 1 (1-indexed); for HOP try --halonumber 0')
+                    del snap
+                    break  # abort — no point trying earlier snaps without a seed
 
                 pynbody.analysis.halo.center(h)
                 r200 = get_r200(h)
                 if r200 is None or r200 <= 0:
-                    print(f'  Could not get r200, skipping')
-                    continue
+                    print(f'  Could not get r200, aborting')
+                    del snap
+                    break
 
                 pos  = snap.dm['pos']
                 dist = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
