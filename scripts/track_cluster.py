@@ -46,7 +46,7 @@ def voxel_all_clusters(positions, iords, voxel_size, degree=1):
 
     Used for satellite discovery (we need ALL clusters, not just the best one).
     """
-    from scipy.ndimage import label as ndimage_label
+    from scipy.ndimage import label as ndimage_label, binary_dilation
 
     if len(positions) == 0:
         return {}
@@ -62,8 +62,9 @@ def voxel_all_clusters(positions, iords, voxel_size, degree=1):
     grid = np.zeros((nx, ny, nz), dtype=bool)
     grid[gx, gy, gz] = True
 
-    s = 2 * degree + 1
-    labeled, n_clusters = ndimage_label(grid, structure=np.ones((s, s, s), dtype=bool))
+    structure3 = np.ones((3, 3, 3), dtype=bool)
+    expanded   = binary_dilation(grid, structure=structure3, iterations=degree) if degree > 0 else grid
+    labeled, n_clusters = ndimage_label(expanded, structure=structure3)
 
     if n_clusters == 0:
         return {}

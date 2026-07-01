@@ -27,7 +27,7 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     -------
     mask : (N,) bool array, or None if no particles found
     """
-    from scipy.ndimage import label as ndimage_label
+    from scipy.ndimage import label as ndimage_label, binary_dilation
 
     if len(positions) == 0:
         return None
@@ -55,18 +55,23 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     else:
         prev_mask = None
 
+    # Fixed (3,3,3) structure — ndimage.label only supports this size.
+    # Degree-D connectivity is achieved by dilating the grid D times before labelling:
+    # two original voxels merge iff their Chebyshev distance <= D.
+    structure3 = np.ones((3, 3, 3), dtype=bool)
+
     best_mask = None
     prev_size = 0
 
     for degree in range(1, max_degree + 1):
-        s = 2 * degree + 1
-        structure = np.ones((s, s, s), dtype=bool)
-        labeled, n_clusters = ndimage_label(grid, structure=structure)
+        # Dilate grid by `degree` steps → voxels within Chebyshev distance D connect
+        expanded = binary_dilation(grid, structure=structure3, iterations=degree)
+        labeled, n_clusters = ndimage_label(expanded, structure=structure3)
 
         if n_clusters == 0:
             break
 
-        # Per-particle labels — vectorised index into label array
+        # Per-particle labels at original occupied positions
         particle_labels = labeled[gx, gy, gz]
 
         # Count particles per label
@@ -91,7 +96,7 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
             break
 
         # Build particle mask for this label
-        curr_mask = labeled[gx, gy, gz] == main_label
+        curr_mask = particle_labels == main_label
         best_mask = curr_mask
 
         if curr_size == prev_size:
