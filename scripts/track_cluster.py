@@ -89,7 +89,7 @@ def majority_vote_halo(halo_cat, prev_halonum, window, prev_iords):
 
     best_halo  = None
     best_idx   = prev_halonum
-    best_score = -1
+    best_score = 0  # require at least 1 overlapping particle
 
     for idx in range(lo, hi + 1):
         try:

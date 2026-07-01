@@ -687,7 +687,9 @@ def calculate_reffs_multi_instance(
             if not AHF_centers_supplied:
                 if AHF_halonums is not None:
                     halonum_snap = AHF_halonums[AHF_halonums["snapshot"] == str(outputs[i])]["AHF halonum"].values
-                    h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap)]
+                    if len(halonum_snap) == 0:
+                        raise KeyError(f'Snapshot {outputs[i]} not found in track_cluster file')
+                    h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap[0])]
                 else:
                     if use_ahf:
                         h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
