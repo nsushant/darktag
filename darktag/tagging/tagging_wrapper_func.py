@@ -838,6 +838,236 @@ def calculate_reffs_multi_instance(
     return dfs_reff
 
 
+def calculate_reffs_hydro_stars(
+    HYDROsim,
+    pynbody_path=None,
+    halo_number=0,
+    output_fname=None,
+    save_to_file=True,
+    use_clustering=True,
+    use_ahf=False,
+    voxel_size_kpc=0.08,
+    max_degree=20,
+    size_jump=2.0,
+):
+    '''
+    Calculate half-light and half-mass radii directly from HYDRO stellar particles.
+
+    No tagging required — deterministic, single output CSV.
+    Applies edge_tangos_properties metallicity corrections before luminosity calculation,
+    then uses pynbody.analysis.luminosity.half_light_r for the halflight radius.
+    Voxel clustering isolates the main galaxy from satellites inside r200c.
+
+    Inputs:
+        HYDROsim       - tangos simulation object (HYDRO)
+        pynbody_path   - path to snapshot data (defaults to config)
+        halo_number    - halo index (default 0)
+        output_fname   - output CSV path (default: <sim_name>_hydro_reffs.csv)
+        save_to_file   - write CSV incrementally (default True)
+        use_clustering - use iterative voxel clustering to exclude satellites (default True)
+        use_ahf        - use AHF catalogue instead of HOP (default False)
+        voxel_size_kpc - voxel edge length in kpc (default 0.08)
+        max_degree     - max voxel connectivity radius in steps (default 20)
+        size_jump      - cluster size ratio signalling satellite absorption (default 2.0)
+
+    Returns:
+        DataFrame with columns: t, z, reff, halflight, kravtsov
+    '''
+    try:
+        import edge_tangos_properties as etp
+    except ImportError:
+        etp = None
+        print('Warning: edge_tangos_properties not found — metallicity corrections will be skipped')
+
+    if pynbody_path is None:
+        pynbody_path = config.get_path('pynbody_path')
+
+    simname = HYDROsim.path
+    if output_fname is None:
+        output_fname = simname.replace('/', '_') + '_hydro_reffs.csv'
+
+    t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halo_number + 1)
+
+    split    = simname.split('_')
+    halonum  = split[0][4:]
+    HYDROname = simname  # full tangos path
+
+    # Resume: build set of already-processed output names
+    processed_outputs = set()
+    stored_reff      = np.array([])
+    stored_reff_z    = np.array([])
+    stored_time      = np.array([])
+    kravtsov_r       = np.array([])
+    lum_halflight    = np.array([])
+    t_to_output      = {round(float(t_all[i]), 8): outputs[i] for i in range(len(outputs))}
+
+    if save_to_file and os.path.isfile(output_fname):
+        try:
+            existing = pd.read_csv(output_fname, index_col=0)
+            if len(existing) > 0:
+                stored_reff     = existing['reff'].values
+                stored_reff_z   = existing['z'].values
+                stored_time     = existing['t'].values
+                kravtsov_r      = existing['kravtsov'].values
+                lum_halflight   = existing['halflight'].values
+                for tv in existing['t'].values:
+                    out_name = t_to_output.get(round(float(tv), 8))
+                    if out_name is not None:
+                        processed_outputs.add(out_name)
+                print(f'Resuming: {len(existing)} snapshots already done')
+        except Exception as e:
+            print(f'Could not read existing output ({e}), starting fresh')
+
+    PrevVoxelIords = np.array([])
+
+    # Main loop — z=0 first (backwards)
+    for i in range(len(outputs))[::-1]:
+        gc.collect()
+
+        if outputs[i] in processed_outputs:
+            print(f'Skipping {outputs[i]} (already done)')
+            continue
+
+        print('Current snapshot -->', outputs[i])
+
+        t_val = t_all[i]
+        z_val = red_all[i]
+
+        hDMO = tangos.get_halo(HYDROname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+
+        simfn = join(pynbody_path, outputs[i])
+        try:
+            HYDROparticles = pynbody.load(simfn)
+        except Exception as e:
+            print(f'--> Failed to load snapshot, skipping! Error: {e}')
+            continue
+
+        # Apply etp metallicity corrections before any filtering
+        if etp is not None:
+            try:
+                etp.stars.StellarProperty._ensure_ramses_metal_are_corrected(HYDROparticles)
+            except Exception as e:
+                print(f'  etp correction failed ({e}), continuing without')
+
+        try:
+            if use_ahf:
+                h = HYDROparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
+            else:
+                hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)
+                h = hop_cat[int(halonums[i]) - 1]
+
+            HYDROparticles.physical_units()
+            pynbody.analysis.halo.center(h)
+            pynbody.analysis.angmom.faceon(h.st)
+        except Exception as e:
+            print(f'Centering failed: {e}, skipping')
+            continue
+
+        try:
+            r200c_pyn = pynbody.analysis.halo.virial_radius(h, overden=200, r_max=None, rho_def='critical')
+        except Exception as e:
+            print(f'Could not calculate R200c: {e}, skipping')
+            continue
+
+        try:
+            kravtsov = hDMO['r200c'] * 0.02
+        except KeyError:
+            kravtsov = float('nan')
+
+        # Select stellar particles within r200c
+        r_st = sqrt(HYDROparticles.st['pos'][:, 0]**2
+                    + HYDROparticles.st['pos'][:, 1]**2
+                    + HYDROparticles.st['pos'][:, 2]**2)
+        stars = HYDROparticles.st[r_st <= r200c_pyn]
+
+        if len(stars) == 0:
+            print('  No stellar particles within r200c, skipping')
+            continue
+
+        # Filter out zero-iron-metallicity stars
+        if etp is not None:
+            try:
+                good_mask = etp.stars.AbundanceRatios._mask_stars_with_zero_iron_metallicity(stars)
+                stars = stars[good_mask]
+            except Exception as e:
+                print(f'  zero-iron mask failed ({e}), skipping filter')
+
+        if len(stars) == 0:
+            print('  No stellar particles after metallicity filter, skipping')
+            continue
+
+        # Voxel clustering to isolate main galaxy
+        if use_clustering:
+            pos_st   = np.array(stars['pos'])
+            iords_st = np.asarray(stars['iord'])
+            mask_st  = _voxel_pick_cluster(
+                pos_st, iords_st, float(voxel_size_kpc),
+                prev_iords=PrevVoxelIords if len(PrevVoxelIords) > 0 else None,
+                max_degree=max_degree,
+                size_jump=size_jump,
+            )
+            if mask_st is None or mask_st.sum() == 0:
+                print('  Voxel clustering returned empty cluster, skipping')
+                continue
+            cluster_stars   = stars[mask_st]
+            PrevVoxelIords  = np.asarray(cluster_stars['iord'])
+        else:
+            cluster_stars = stars
+
+        # Centre on cluster
+        cen = calc_3D_cm(cluster_stars, cluster_stars['mass'])
+        cluster_stars['pos'] -= cen
+
+        # Half-light radius via pynbody SSP (etp corrections already applied)
+        try:
+            hlight = pynbody.analysis.luminosity.half_light_r(cluster_stars, band='V')
+        except Exception as e:
+            print(f'  half_light_r failed ({e}), storing NaN')
+            hlight = float('nan')
+
+        # Half-mass radius (cylindrical, sorted cumsum)
+        rxy = np.sqrt(cluster_stars['x']**2 + cluster_stars['y']**2)
+        sorted_idx    = np.argsort(rxy)
+        sorted_rxy    = np.asarray(rxy)[sorted_idx]
+        sorted_masses = np.asarray(cluster_stars['mass'])[sorted_idx]
+        cumsum_mass   = np.cumsum(sorted_masses)
+        R_half        = float(sorted_rxy[np.where(cumsum_mass >= cumsum_mass[-1] / 2)[0][0]])
+
+        cluster_stars['pos'] += cen
+
+        stored_reff    = np.append(stored_reff,    R_half)
+        stored_reff_z  = np.append(stored_reff_z,  z_val)
+        stored_time    = np.append(stored_time,    t_val)
+        kravtsov_r     = np.append(kravtsov_r,     kravtsov)
+        lum_halflight  = np.append(lum_halflight,  hlight)
+        processed_outputs.add(outputs[i])
+
+        if save_to_file:
+            df_out = pd.DataFrame({
+                'halflight': lum_halflight,
+                'reff':      stored_reff,
+                'z':         stored_reff_z,
+                't':         stored_time,
+                'kravtsov':  kravtsov_r,
+            })
+            df_out.to_csv(output_fname)
+            print(f'  Wrote {output_fname}')
+
+        del HYDROparticles
+
+    df_final = pd.DataFrame({
+        'halflight': lum_halflight,
+        'reff':      stored_reff,
+        'z':         stored_reff_z,
+        't':         stored_time,
+        'kravtsov':  kravtsov_r,
+    })
+    if save_to_file:
+        df_final.to_csv(output_fname)
+
+    return df_final
+
+
 '''
 def calculate_reffs_over_full_sim(DMOsim, data_particles_tagged, pynbody_path  = None , AHF_centers_file = None):
 
