@@ -158,6 +158,8 @@ def main():
                         help='Fixed degree for satellite discovery clustering (default: 1)')
     parser.add_argument('--ahf', action='store_true',
                         help='Use AHF catalogue instead of HOP (required for HYDRO sims)')
+    parser.add_argument('--dmo', action='store_true',
+                        help='Use DMO pynbody_path from config (default: use hydro_pynbody_path)')
     parser.add_argument('--output', default=None,
                         help='Output HDF5 path (default: <sim_name>_cluster_tree.hdf5)')
     args = parser.parse_args()
@@ -174,7 +176,11 @@ def main():
     use_ahf         = args.ahf
     output_path     = args.output or f'{sim_name}_cluster_tree.hdf5'
 
-    pynbody_path = pjoin(config.get_path('pynbody_path'), sim_name)
+    if args.dmo:
+        _base_path = config.get_path('pynbody_path')
+    else:
+        _base_path = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
+    pynbody_path = pjoin(_base_path, sim_name)
 
     snap_paths = sorted(glob.glob(pjoin(pynbody_path, 'output_*')))
     if len(snap_paths) == 0:
