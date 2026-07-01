@@ -3,6 +3,7 @@
       
       "tangos_path":"/scratch/dp324/shared/dp101/EDGE/tangos/",
       "pynbody_path":"/scratch/dp324/shared/dp101/EDGE/",
+      "hydro_pynbody_path":"",
       "manual_halonum_path":"",
       "manual_mstar_path":""
               

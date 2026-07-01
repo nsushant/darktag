@@ -878,7 +878,8 @@ def angmom_tag_multi_instance_hydro_dm(
             print("Done with iteration", i)
             continue
 
-        simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+        _hydro_base = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
+        simfn = join(_hydro_base, DMOname, outputs[i])
         try:
             HYDROparticles = pynbody.load(simfn)
             HYDROparticles.physical_units()
@@ -1084,7 +1085,8 @@ def angmom_tag_multi_instance_hydro_mstars(
             print("Couldn't load R200 at timestep:", i)
             continue
 
-        simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+        _hydro_base = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
+        simfn = join(_hydro_base, DMOname, outputs[i])
         try:
             HYDROparticles = pynbody.load(simfn)
             HYDROparticles.physical_units()
@@ -1133,6 +1135,154 @@ def angmom_tag_multi_instance_hydro_mstars(
                 row.to_csv(filenames[k], mode='a', header=False)
 
         del HYDROparticles
+        print("Done with iteration", i)
+
+    print(f'\nFinished. Wrote {n_instances} output files:')
+    for fn in filenames:
+        print(' ', fn)
+    return filenames
+
+
+def angmom_tag_dmo_hydro_mstars(
+    DMOsim,
+    HYDROsim,
+    n_instances,
+    halonumber=1,
+    free_param_value=0.01,
+    output_prefix=None,
+    track_cluster_file=None,
+):
+    '''
+    Multi-instance angular momentum tagging on DMO DM particles using stellar mass
+    from the paired HYDRO simulation (SFR_histogram via integrate_sfr).
+
+    Identical flow to angmom_tag_multi_instance_hydro_mstars but loads DMO snapshots
+    instead of HYDRO snapshots. Stellar mass increments are sourced from HYDROsim's
+    tangos SFR_histogram, so no DarkLight stochasticity is involved.
+
+    Inputs:
+        DMOsim           - tangos DMO simulation object (particle loading + r200c)
+        HYDROsim         - tangos HYDRO simulation object (SFR_histogram only)
+        n_instances      - number of output instances (results are identical; n=1 is fine)
+        halonumber       - halo number in DMO sim (default 1)
+        free_param_value - tagging fraction (default 0.01)
+        output_prefix    - directory for output CSVs
+        track_cluster_file - track_cluster HDF5; switches to AHF + filters by cluster iords
+
+    Returns:
+        list of output CSV filenames (length n_instances)
+    '''
+    from .angular_momentum_tagging_HYDRO_DM import integrate_sfr
+
+    DMOname = DMOsim.path
+
+    t_all, red_all, main_halo_dmo, halonums, outputs = load_indexing_data(DMOsim, halonumber)
+
+    # Stellar mass history from paired HYDRO sim
+    _, _, main_halo_hydro, _, _ = load_indexing_data(HYDROsim, halonumber)
+    mstar_array, t_sfr = integrate_sfr(main_halo_hydro["SFR_histogram"], t_all[-1])
+    print(f'Hydro mstar history: {len(mstar_array)} bins up to t={t_all[-1]:.2f} Gyr')
+
+    def _mstar_at_hydro(t_target):
+        idx = np.argmin(abs(t_sfr - t_target))
+        return float(mstar_array[idx])
+
+    # Load track_cluster HDF5 if supplied
+    _tc_halonum_map   = None
+    cluster_iords_map = None
+    if track_cluster_file is not None:
+        import h5py
+        _tc_data = {}
+        with h5py.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = {
+                        'halonum': int(f[snap]['main']['halonum'][()]),
+                        'iords':   f[snap]['main']['iords'][:],
+                    }
+        _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
+        cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
+        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+
+    if output_prefix is None:
+        output_prefix = DMOname + '_tagged_dmo_hydromstars'
+    os.makedirs(output_prefix, exist_ok=True)
+    filenames = [os.path.join(output_prefix, f"instance_{k:03d}.csv") for k in range(n_instances)]
+    _header = pd.DataFrame({'iords': [], 'mstar': [], 't': [], 'z': [], 'type': []})
+    for fn in filenames:
+        _header.to_csv(fn, mode='w', header=True)
+
+    for i in range(len(outputs)):
+        gc.collect()
+        print('Current snapshot -->', outputs[i])
+
+        hDMO  = tangos.get_halo(DMOname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+        z_val = red_all[i]
+        t_val = t_all[i]
+
+        msn = _mstar_at_hydro(t_val)
+        msp = _mstar_at_hydro(t_all[i - 1]) if i > 0 else 0.0
+        mass_select = int(msn - msp)
+
+        if mass_select <= 0:
+            print("Done with iteration", i)
+            continue
+
+        try:
+            hDMO['r200c']
+        except Exception:
+            print("Couldn't load R200 at timestep:", i)
+            continue
+
+        simfn = join(config.get_path("pynbody_path"), DMOname, outputs[i])
+        try:
+            DMOparticles = pynbody.load(simfn)
+            DMOparticles.physical_units()
+        except Exception as e:
+            print(f'--> failed to load snapshot: {e}, skipping')
+            continue
+
+        if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+            h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+            h = DMOparticles.halos()[int(halonums[i]) - 1]
+        pynbody.analysis.halo.center(h)
+
+        try:
+            r200c_pyn = pynbody.analysis.halo.virial_radius(
+                h.d, overden=200, r_max=None, rho_def='critical')
+        except Exception:
+            print('could not calculate R200c')
+            del DMOparticles
+            continue
+
+        dm_within = DMOparticles.dm[
+            sqrt(DMOparticles.dm['pos'][:, 0] ** 2
+                 + DMOparticles.dm['pos'][:, 1] ** 2
+                 + DMOparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
+        ]
+
+        if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+            dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
+
+        parts_sorted_angmom = rank_order_particles_by_angmom(dm_within)
+        del dm_within
+
+        if parts_sorted_angmom.shape[0] > 0:
+            arr = assign_stars_to_particles(mass_select, parts_sorted_angmom, float(free_param_value))
+            for k in range(n_instances):
+                row = pd.DataFrame({
+                    'iords': arr[0],
+                    'mstar': arr[1],
+                    't':    np.repeat(t_val, len(arr[0])),
+                    'z':    np.repeat(z_val, len(arr[0])),
+                    'type': np.repeat('insitu', len(arr[0])),
+                })
+                row.to_csv(filenames[k], mode='a', header=False)
+
+        del DMOparticles
         print("Done with iteration", i)
 
     print(f'\nFinished. Wrote {n_instances} output files:')
