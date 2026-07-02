@@ -53,7 +53,7 @@ def main():
 
     sim_name     = args.sim_name
     tangos_path  = config.get_path('tangos_path')
-    pynbody_path = config.get_path('pynbody_path')
+    pynbody_path = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
     db_stem      = args.db_name or sim_name.split('_')[0]
     output_csv   = args.output_csv or f'{sim_name}_hydro_reffs.csv'
 

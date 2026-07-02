@@ -66,7 +66,7 @@ def main():
     size_jump   = args.size_jump
     rad_buf     = args.radius_buffer
 
-    pynbody_path = config.get_path('pynbody_path')
+    pynbody_path = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
 
     try:
         import pynbody
