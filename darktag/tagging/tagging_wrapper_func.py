@@ -979,7 +979,7 @@ def calculate_reffs_hydro_stars(
 
             HYDROparticles.physical_units()
             pynbody.analysis.halo.center(h)
-            pynbody.analysis.angmom.faceon(h.st)
+            pynbody.analysis.angmom.faceon(h.dm)
         except Exception as e:
             print(f'Centering failed: {e}, skipping')
             continue
