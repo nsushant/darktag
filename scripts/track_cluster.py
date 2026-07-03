@@ -105,6 +105,40 @@ def majority_vote_halo(halo_cat, prev_halonum, window, prev_iords):
     return best_halo, best_idx
 
 
+def centroid_fallback_halo(halo_cat, prev_centroid, prev_iords, max_centroid_dist=500.0):
+    """
+    Fallback halo finder using spatial proximity of AHF halo centres.
+    Reads halo centres from AHF properties (no particle loading).
+    Among halos within max_centroid_dist kpc of prev_centroid, returns
+    the one with most iord overlap with prev_iords.
+    """
+    best_halo  = None
+    best_idx   = None
+    best_score = 0
+
+    for idx in range(1, len(halo_cat) + 1):
+        try:
+            h = halo_cat[idx]
+            props = h.properties
+            xc = float(props.get('Xc', props.get('Xcmbp', None)))
+            yc = float(props.get('Yc', props.get('Ycmbp', None)))
+            zc = float(props.get('Zc', props.get('Zcmbp', None)))
+            dist = np.sqrt((xc - prev_centroid[0])**2 +
+                           (yc - prev_centroid[1])**2 +
+                           (zc - prev_centroid[2])**2)
+            if dist > max_centroid_dist:
+                continue
+            score = len(np.intersect1d(h.dm['iord'], prev_iords))
+            if score > best_score:
+                best_score = score
+                best_halo  = h
+                best_idx   = idx
+        except Exception:
+            continue
+
+    return best_halo, best_idx
+
+
 def get_r200(h):
     """Read r200 from halo properties, fallback to pynbody virial radius calc."""
     import pynbody
@@ -160,6 +194,12 @@ def main():
                         help='Use AHF catalogue instead of HOP (required for HYDRO sims)')
     parser.add_argument('--dmo', action='store_true',
                         help='Use DMO pynbody_path from config (default: use hydro_pynbody_path)')
+    parser.add_argument('--centroid', action='store_true',
+                        help='Fall back to centroid-based halo search if majority vote fails')
+    parser.add_argument('--centroid-max-dist', type=float, default=500.0,
+                        help='Max distance (kpc) from previous centroid for fallback search (default: 500)')
+    parser.add_argument('--wall-time', type=float, default=None,
+                        help='Stop N minutes before wall time limit to exit gracefully (default: no limit)')
     parser.add_argument('--output', default=None,
                         help='Output HDF5 path (default: <sim_name>_cluster_tree.hdf5)')
     args = parser.parse_args()
@@ -174,7 +214,10 @@ def main():
     window          = args.halo_search_window
     sat_degree      = args.sat_discovery_degree
     use_ahf         = args.ahf
-    output_path     = args.output or f'{sim_name}_cluster_tree.hdf5'
+    use_centroid      = args.centroid
+    centroid_max_dist = args.centroid_max_dist
+    wall_time         = args.wall_time
+    output_path       = args.output or f'{sim_name}_cluster_tree.hdf5'
 
     if args.dmo:
         _base_path = config.get_path('pynbody_path')
@@ -204,22 +247,25 @@ def main():
             done = set(f.keys())
             if done:
                 outputs_reversed = outputs[::-1]
-                # Find the earliest processed snapshot (highest idx in outputs_reversed)
+                # Find the earliest VALID processed snapshot (skip partial/empty groups)
                 last_done   = None
                 resume_from = None
                 for idx, out in enumerate(outputs_reversed):
                     if out in done:
-                        last_done   = out
-                        resume_from = idx + 1
-                        # keep scanning — we want the last match (earliest time)
+                        grp_check = f[out]
+                        # Only accept if main branch has iords (i.e. was fully written)
+                        if 'main' in grp_check and 'iords' in grp_check['main']:
+                            last_done   = out
+                            resume_from = idx + 1
+                        # keep scanning — we want the last valid match (earliest time)
                 if last_done is not None:
-                    with h5py.File(output_path, 'r') as f2:
-                        grp = f2[last_done]
-                        for branch_id in grp.keys():
-                            active_branches[branch_id] = {
-                                'prev_iords':   grp[branch_id]['iords'][:],
-                                'prev_halonum': int(grp[branch_id]['halonum'][()]),
-                            }
+                    grp = f[last_done]
+                    for branch_id in grp.keys():
+                        active_branches[branch_id] = {
+                            'prev_iords':    grp[branch_id]['iords'][:],
+                            'prev_halonum':  int(grp[branch_id]['halonum'][()]),
+                            'prev_centroid': grp[branch_id]['centroid'][:] if 'centroid' in grp[branch_id] else None,
+                        }
         print(f'Resuming from after {last_done} — {len(active_branches)} active branches')
 
     # ── Main loop (z=0 first) ─────────────────────────────────────────────────
@@ -227,9 +273,13 @@ def main():
     start_idx        = resume_from or 0
 
     h5f = h5py.File(output_path, 'a')
+    t_start = __import__('time').time()
 
     try:
         for output in outputs_reversed[start_idx:]:
+            if wall_time is not None and (__import__('time').time() - t_start) > (wall_time - 5) * 60:
+                print(f'\nApproaching wall time limit ({wall_time:.0f} min), stopping gracefully.')
+                break
             print(f'\n── {output} ──')
 
             simfn = pjoin(pynbody_path, output)
@@ -289,16 +339,18 @@ def main():
                 bounding_r    = float(np.sqrt(((main_pos - centroid)**2).sum(axis=1)).max())
 
                 active_branches['main'] = {
-                    'prev_iords':   main_iords,
-                    'prev_halonum': halonumber,
+                    'prev_iords':    main_iords,
+                    'prev_halonum':  halonumber,
+                    'prev_centroid': centroid,
                 }
 
                 grp = h5f.require_group(output)
                 mg  = grp.require_group('main')
-                mg.create_dataset('iords',          data=main_iords.astype(np.int64))
-                mg.create_dataset('halonum',        data=np.int64(halonumber))
-                mg.create_dataset('centroid',       data=centroid.astype(np.float64))
-                mg.create_dataset('bounding_radius',data=np.float64(bounding_r))
+                mg.create_dataset('iords',            data=main_iords.astype(np.int64))
+                mg.create_dataset('halonum',          data=np.int64(halonumber))
+                mg.create_dataset('halonum_reliable', data=np.bool_(True))
+                mg.create_dataset('centroid',         data=centroid.astype(np.float64))
+                mg.create_dataset('bounding_radius',  data=np.float64(bounding_r))
                 h5f.flush()
                 print(f'  Seeded main branch: {len(main_iords)} particles '
                       f'(halo {halonumber}, r200={r200:.2f} kpc, '
@@ -311,6 +363,16 @@ def main():
             main_h, main_halonum = majority_vote_halo(
                 halo_cat, active_branches['main']['prev_halonum'],
                 window,  active_branches['main']['prev_iords'])
+
+            if main_h is None and use_centroid:
+                prev_centroid = active_branches['main'].get('prev_centroid')
+                if prev_centroid is not None:
+                    print(f'  Main branch: majority vote failed, trying centroid fallback')
+                    main_h, main_halonum = centroid_fallback_halo(
+                        halo_cat, prev_centroid, active_branches['main']['prev_iords'],
+                        max_centroid_dist=centroid_max_dist)
+                    if main_h is not None:
+                        print(f'  Centroid fallback found halo {main_halonum}')
 
             if main_h is None:
                 print(f'  Main branch: no matching halo found, skipping snap')
@@ -361,14 +423,16 @@ def main():
                 bounding_r    = float(np.sqrt(((cluster_pos - centroid)**2).sum(axis=1)).max())
                 claimed_iords.update(cluster_iords.tolist())
 
-                branch['prev_iords']   = cluster_iords
+                branch['prev_iords']    = cluster_iords
+                branch['prev_centroid'] = centroid
                 branch['prev_halonum'] = halonum_b
 
                 bg = grp.require_group(branch_id)
-                bg.create_dataset('iords',          data=cluster_iords.astype(np.int64))
-                bg.create_dataset('halonum',        data=np.int64(halonum_b))
-                bg.create_dataset('centroid',       data=centroid.astype(np.float64))
-                bg.create_dataset('bounding_radius',data=np.float64(bounding_r))
+                bg.create_dataset('iords',            data=cluster_iords.astype(np.int64))
+                bg.create_dataset('halonum',          data=np.int64(halonum_b))
+                bg.create_dataset('halonum_reliable', data=np.bool_(h_b is not None))
+                bg.create_dataset('centroid',         data=centroid.astype(np.float64))
+                bg.create_dataset('bounding_radius',  data=np.float64(bounding_r))
 
                 r200_b_str = f'{get_r200(h_b):.2f}' if h_b is not None else 'n/a'
                 print(f'  Branch {branch_id}: {len(cluster_iords)} particles '
@@ -402,10 +466,11 @@ def main():
                 n_sat += 1
 
                 sg = grp.require_group(sat_id)
-                sg.create_dataset('iords',          data=sat_iords.astype(np.int64))
-                sg.create_dataset('halonum',        data=np.int64(halonum_sat))
-                sg.create_dataset('centroid',       data=sat_centroid.astype(np.float64))
-                sg.create_dataset('bounding_radius',data=np.float64(sat_bounding_r))
+                sg.create_dataset('iords',            data=sat_iords.astype(np.int64))
+                sg.create_dataset('halonum',          data=np.int64(halonum_sat))
+                sg.create_dataset('halonum_reliable', data=np.bool_(h_sat is not None))
+                sg.create_dataset('centroid',         data=sat_centroid.astype(np.float64))
+                sg.create_dataset('bounding_radius',  data=np.float64(sat_bounding_r))
                 print(f'  Spawned new branch {sat_id}: {len(sat_iords)} particles '
                       f'(halo {halonum_sat}, bounding_r={sat_bounding_r:.2f} kpc)')
 
