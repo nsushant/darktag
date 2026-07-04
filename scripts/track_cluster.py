@@ -79,30 +79,49 @@ def voxel_all_clusters(positions, iords, voxel_size, degree=1):
     return clusters
 
 
-def majority_vote_halo(halo_cat, prev_halonum, window, prev_iords):
+def majority_vote_halo(halo_cat, prev_halonum, window, prev_iords, prefer_stars=False):
     """
     Search halos in [prev_halonum-window, prev_halonum+window].
     Return (halo_obj, halo_index) with most iord overlap with prev_iords.
+
+    If prefer_stars=True, restrict candidates to halos that contain at least
+    one stellar particle before picking the best overlap. If no candidate has
+    stars (e.g. before first star formation), falls back to the normal winner.
     """
     lo = max(0, prev_halonum - window)
     hi = prev_halonum + window
 
-    best_halo  = None
-    best_idx   = prev_halonum
-    best_score = 0  # require at least 1 overlapping particle
+    candidates = []  # list of (score, idx, halo_obj, has_stars)
 
     for idx in range(lo, hi + 1):
         try:
             h = halo_cat[idx]
             score = len(np.intersect1d(h.dm['iord'], prev_iords))
-            if score > best_score:
-                best_score = score
-                best_halo  = h
-                best_idx   = idx
+            if score == 0:
+                continue
+            has_stars = False
+            if prefer_stars:
+                try:
+                    has_stars = len(h.st) > 0
+                except Exception:
+                    pass
+            candidates.append((score, idx, h, has_stars))
         except Exception:
             continue
 
-    return best_halo, best_idx
+    if not candidates:
+        return None, prev_halonum
+
+    if prefer_stars:
+        starred = [(s, i, h) for s, i, h, hs in candidates if hs]
+        pool = starred if starred else [(s, i, h) for s, i, h, _ in candidates]
+        if not starred:
+            print('  majority_vote_halo: no candidate has stars, using best overlap')
+    else:
+        pool = [(s, i, h) for s, i, h, _ in candidates]
+
+    best = max(pool, key=lambda x: x[0])
+    return best[2], best[1]
 
 
 def centroid_fallback_halo(halo_cat, prev_centroid, prev_iords, max_centroid_dist=500.0):
@@ -200,6 +219,9 @@ def main():
                         help='Max distance (kpc) from previous centroid for fallback search (default: 500)')
     parser.add_argument('--wall-time', type=float, default=None,
                         help='Stop N minutes before wall time limit to exit gracefully (default: no limit)')
+    parser.add_argument('--prefer-stars', action='store_true',
+                        help='Prefer halos with stellar particles when multiple candidates have DM overlap '
+                             '(useful for HYDRO sims to avoid tracking star-free DM halos)')
     parser.add_argument('--output', default=None,
                         help='Output HDF5 path (default: <sim_name>_cluster_tree.hdf5)')
     args = parser.parse_args()
@@ -217,6 +239,7 @@ def main():
     use_centroid      = args.centroid
     centroid_max_dist = args.centroid_max_dist
     wall_time         = args.wall_time
+    prefer_stars      = args.prefer_stars
     output_path       = args.output or f'{sim_name}_cluster_tree.hdf5'
 
     if args.dmo:
@@ -362,7 +385,8 @@ def main():
 
             main_h, main_halonum = majority_vote_halo(
                 halo_cat, active_branches['main']['prev_halonum'],
-                window,  active_branches['main']['prev_iords'])
+                window,  active_branches['main']['prev_iords'],
+                prefer_stars=prefer_stars)
 
             if main_h is None and use_centroid:
                 prev_centroid = active_branches['main'].get('prev_centroid')
@@ -403,7 +427,8 @@ def main():
             # Update all existing branches with iterative voxel refinement
             for branch_id, branch in list(active_branches.items()):
                 h_b, halonum_b = majority_vote_halo(
-                    halo_cat, branch['prev_halonum'], window, branch['prev_iords'])
+                    halo_cat, branch['prev_halonum'], window, branch['prev_iords'],
+                    prefer_stars=prefer_stars)
                 halonum_b = halonum_b if h_b is not None else branch['prev_halonum']
 
                 mask = _voxel_pick_cluster(
