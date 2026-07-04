@@ -985,24 +985,15 @@ def calculate_reffs_hydro_stars(
             continue
 
         try:
-            r200c_pyn = pynbody.analysis.halo.virial_radius(h, overden=200, r_max=None, rho_def='critical')
-        except Exception as e:
-            print(f'Could not calculate R200c: {e}, skipping')
-            continue
-
-        try:
             kravtsov = hDMO['r200c'] * 0.02
         except KeyError:
             kravtsov = float('nan')
 
-        # Select stellar particles within r200c
-        r_st = sqrt(HYDROparticles.st['pos'][:, 0]**2
-                    + HYDROparticles.st['pos'][:, 1]**2
-                    + HYDROparticles.st['pos'][:, 2]**2)
-        stars = HYDROparticles.st[r_st <= r200c_pyn]
+        # Use stellar particles from the AHF halo — voxel clustering will isolate the main galaxy
+        stars = h.st
 
         if len(stars) == 0:
-            print('  No stellar particles within r200c, skipping')
+            print('  No stellar particles in snapshot, skipping')
             continue
 
         # Filter out zero-iron-metallicity stars
