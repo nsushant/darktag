@@ -36,11 +36,12 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
     vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
 
-    # Shift to zero-based indices
-    ox, oy, oz = vx.min(), vy.min(), vz.min()
-    gx = vx - ox
-    gy = vy - oy
-    gz = vz - oz
+    # Shift to zero-based indices; int32 halves memory vs int64 for these index arrays
+    ox, oy, oz = int(vx.min()), int(vy.min()), int(vz.min())
+    gx = (vx - ox).astype(np.int32)
+    gy = (vy - oy).astype(np.int32)
+    gz = (vz - oz).astype(np.int32)
+    del vx, vy, vz
 
     nx, ny, nz = int(gx.max()) + 1, int(gy.max()) + 1, int(gz.max()) + 1
 
@@ -48,10 +49,9 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     grid = np.zeros((nx, ny, nz), dtype=bool)
     grid[gx, gy, gz] = True
 
-    # Precompute prev_iord mask as a boolean array aligned to iords
+    # np.isin is O(N log M) — replaces the previous O(N·M) Python loop
     if prev_iords is not None and len(prev_iords) > 0:
-        prev_set = set(prev_iords)
-        prev_mask = np.array([iord in prev_set for iord in iords], dtype=bool)
+        prev_mask = np.isin(iords, prev_iords)
     else:
         prev_mask = None
 
@@ -62,17 +62,21 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
 
     best_mask = None
     prev_size = 0
+    # Carry the dilated grid forward — each iteration adds exactly 1 dilation step
+    # instead of restarting from scratch (degree=20 → 20 passes vs 210).
+    expanded = grid.copy()
 
     for degree in range(1, max_degree + 1):
-        # Dilate grid by `degree` steps → voxels within Chebyshev distance D connect
-        expanded = binary_dilation(grid, structure=structure3, iterations=degree)
+        expanded = binary_dilation(expanded, structure=structure3, iterations=1)
         labeled, n_clusters = ndimage_label(expanded, structure=structure3)
 
         if n_clusters == 0:
+            del labeled
             break
 
-        # Per-particle labels at original occupied positions
+        # Extract per-particle labels then immediately free the large labeled grid
         particle_labels = labeled[gx, gy, gz]
+        del labeled
 
         # Count particles per label
         label_counts = np.bincount(particle_labels, minlength=n_clusters + 1)
@@ -106,6 +110,7 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
 
         prev_size = curr_size
 
+    del expanded
     return best_mask
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):

@@ -39,7 +39,34 @@ from darktag.tagging.tagging_wrapper_func import _voxel_pick_cluster
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def voxel_all_clusters(positions, iords, voxel_size, degree=1):
+def clip_to_cluster(positions, iords, prev_iords, padding_factor=2.0, min_radius_kpc=100.0):
+    """
+    Restrict positions/iords to a sphere around where the previous cluster iords
+    currently are, with a padding_factor * bounding_radius buffer.
+
+    This prevents the voxel grid from spanning the full search sphere (which can be
+    many GiB for large halos at fine voxel resolution).
+
+    Falls back to the full arrays if prev_iords cannot be located in the current snap.
+    """
+    if prev_iords is None or len(prev_iords) == 0:
+        return positions, iords
+
+    in_prev = np.isin(iords, prev_iords)
+    if not in_prev.any():
+        return positions, iords
+
+    prev_pos   = positions[in_prev]
+    centroid   = prev_pos.mean(axis=0)
+    bounding_r = float(np.sqrt(((prev_pos - centroid) ** 2).sum(axis=1)).max())
+    clip_r     = max(bounding_r * padding_factor, min_radius_kpc)
+
+    dist = np.sqrt(((positions - centroid) ** 2).sum(axis=1))
+    mask = dist <= clip_r
+    return positions[mask], iords[mask]
+
+
+def voxel_all_clusters(positions, iords, voxel_size, degree=1, max_grid_gb=8.0):
     """
     Run ndimage.label at a fixed degree and return all clusters as a dict:
         root_label -> iords array
@@ -55,26 +82,42 @@ def voxel_all_clusters(positions, iords, voxel_size, degree=1):
     vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
     vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
 
-    ox, oy, oz = vx.min(), vy.min(), vz.min()
-    gx, gy, gz = vx - ox, vy - oy, vz - oz
+    ox, oy, oz = int(vx.min()), int(vy.min()), int(vz.min())
+    gx = (vx - ox).astype(np.int32)
+    gy = (vy - oy).astype(np.int32)
+    gz = (vz - oz).astype(np.int32)
+    del vx, vy, vz
 
     nx, ny, nz = int(gx.max()) + 1, int(gy.max()) + 1, int(gz.max()) + 1
+    grid_gb = nx * ny * nz / 1e9  # bool = 1 byte
+    if grid_gb > max_grid_gb:
+        print(f'  voxel_all_clusters: grid ({nx}×{ny}×{nz}) would require '
+              f'{grid_gb:.1f} GB, skipping satellite discovery for this snap')
+        return {}
+
     grid = np.zeros((nx, ny, nz), dtype=bool)
     grid[gx, gy, gz] = True
 
     structure3 = np.ones((3, 3, 3), dtype=bool)
-    expanded   = binary_dilation(grid, structure=structure3, iterations=degree) if degree > 0 else grid
+    expanded = binary_dilation(grid, structure=structure3, iterations=degree) if degree > 0 else grid
+    del grid
     labeled, n_clusters = ndimage_label(expanded, structure=structure3)
+    del expanded
 
     if n_clusters == 0:
         return {}
 
+    # Extract per-particle labels, free the large labeled grid immediately
     particle_labels = labeled[gx, gy, gz]
-    clusters = {}
-    for lbl in range(1, n_clusters + 1):
-        mask = particle_labels == lbl
-        if mask.any():
-            clusters[lbl] = iords[mask]
+    del labeled
+
+    # Build cluster dict without a Python loop — sort by label then split
+    sort_idx      = np.argsort(particle_labels, kind='stable')
+    sorted_labels = particle_labels[sort_idx]
+    sorted_iords  = iords[sort_idx]
+    unique_lbls, counts = np.unique(sorted_labels, return_counts=True)
+    splits = np.split(sorted_iords, np.cumsum(counts)[:-1])
+    clusters = {int(lbl): arr for lbl, arr in zip(unique_lbls, splits) if lbl > 0}
 
     return clusters
 
@@ -348,16 +391,23 @@ def main():
                 positions = np.array(dm_within['pos'])
                 iords_all = np.array(dm_within['iord'])
 
+                # For seeding, clip to 1×r200 — the halo is centred at origin
+                # and the wide search sphere is only needed for satellites / tracking
+                seed_dist = np.sqrt((positions ** 2).sum(axis=1))
+                seed_mask = seed_dist <= r200
+                seed_pos   = positions[seed_mask]
+                seed_iords = iords_all[seed_mask]
+
                 mask = _voxel_pick_cluster(
-                    positions, iords_all, voxel_size,
+                    seed_pos, seed_iords, voxel_size,
                     prev_iords=None, max_degree=max_degree, size_jump=size_jump,
                 )
                 if mask is None or mask.sum() == 0:
                     print(f'  Seed clustering failed, skipping')
                     continue
 
-                main_iords    = iords_all[mask]
-                main_pos      = positions[mask]
+                main_iords    = seed_iords[mask]
+                main_pos      = seed_pos[mask]
                 centroid      = main_pos.mean(axis=0)
                 bounding_r    = float(np.sqrt(((main_pos - centroid)**2).sum(axis=1)).max())
 
@@ -431,8 +481,13 @@ def main():
                     prefer_stars=prefer_stars)
                 halonum_b = halonum_b if h_b is not None else branch['prev_halonum']
 
+                # Clip to a tight sphere around where this branch's particles
+                # currently are — avoids allocating a grid over the full search sphere
+                clip_pos, clip_iords = clip_to_cluster(
+                    positions, iords_all, branch['prev_iords'])
+
                 mask = _voxel_pick_cluster(
-                    positions, iords_all, voxel_size,
+                    clip_pos, clip_iords, voxel_size,
                     prev_iords=branch['prev_iords'],
                     max_degree=max_degree,
                     size_jump=size_jump,
@@ -442,8 +497,8 @@ def main():
                     print(f'  Branch {branch_id}: no cluster found, dropping branch')
                     continue
 
-                cluster_iords = iords_all[mask]
-                cluster_pos   = positions[mask]
+                cluster_iords = clip_iords[mask]
+                cluster_pos   = clip_pos[mask]
                 centroid      = cluster_pos.mean(axis=0)
                 bounding_r    = float(np.sqrt(((cluster_pos - centroid)**2).sum(axis=1)).max())
                 claimed_iords.update(cluster_iords.tolist())
