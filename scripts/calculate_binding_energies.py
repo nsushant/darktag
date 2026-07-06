@@ -100,6 +100,8 @@ def main():
                         help='Use DMO pynbody_path from config (default: hydro_pynbody_path)')
     parser.add_argument('--softening', type=float, default=10.0,
                         help='Softening length in pc for direct gravity (default: 10)')
+    parser.add_argument('--r200-fraction', type=float, default=0.1,
+                        help='Fraction of r200c to use for BE calculation (default: 0.1)')
     parser.add_argument('--wall-time', type=float, default=None,
                         help='Stop this many minutes before wall-clock limit (graceful exit)')
     args = parser.parse_args()
@@ -107,9 +109,10 @@ def main():
     sim_name    = args.sim_name
     track_path  = args.track
     output_path = args.output or f'{sim_name}_binding_energies.hdf5'
-    use_ahf     = args.ahf
-    softening   = args.softening
-    wall_time   = args.wall_time
+    use_ahf      = args.ahf
+    softening    = args.softening
+    wall_time    = args.wall_time
+    r200_frac    = args.r200_fraction
 
     # ── Paths ─────────────────────────────────────────────────────────────────
     if args.dmo:
@@ -164,7 +167,7 @@ def main():
             for key in hf.keys():
                 # Only mark as done if the group has all expected datasets
                 grp = hf[key]
-                if all(d in grp for d in ('iords', 'total_energy', 'pe', 'ke', 'rank', 'r200c')):
+                if all(d in grp for d in ('iords', 'total_energy', 'pe', 'ke', 'rank', 'r200c', 'r200_frac')):
                     already_done.add(key)
         print(f'Resuming: {len(already_done)} snapshots already complete, '
               f'{len(outputs_to_process) - len(already_done)} remaining')
@@ -239,18 +242,19 @@ def main():
                 del snap
                 continue
 
-            # Select DM particles within r200c
+            # Select DM particles within r200_frac * r200c
+            r_cut = r200_frac * r200c
             dm = h.dm
             pos = np.asarray(dm['pos'])
             r   = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
-            dm_r200 = dm[r <= r200c]
+            dm_r200 = dm[r <= r_cut]
 
             if len(dm_r200) == 0:
-                print(f'  No DM particles within r200c ({r200c:.2f} kpc), skipping')
+                print(f'  No DM particles within {r200_frac}×r200c ({r_cut:.2f} kpc), skipping')
                 del snap
                 continue
 
-            print(f'  r200c = {r200c:.2f} kpc,  {len(dm_r200)} DM particles')
+            print(f'  r200c = {r200c:.2f} kpc,  cut = {r200_frac}×r200c = {r_cut:.2f} kpc,  {len(dm_r200)} DM particles')
 
             # Compute binding energies
             try:
@@ -268,6 +272,7 @@ def main():
             grp.create_dataset('ke',           data=ke)
             grp.create_dataset('rank',         data=rank)
             grp.create_dataset('r200c',        data=np.float64(r200c))
+            grp.create_dataset('r200_frac',    data=np.float64(r200_frac))
             hf.flush()
 
             print(f'  Written: {len(iords)} particles  '

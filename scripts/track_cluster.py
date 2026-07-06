@@ -352,6 +352,7 @@ def main():
             try:
                 snap = pynbody.load(simfn)
                 snap.physical_units()
+                print(f'  Loaded ({len(snap.dm)} DM particles)')
             except Exception as e:
                 print(f'  Failed to load snapshot: {e}, skipping')
                 continue
@@ -453,6 +454,7 @@ def main():
                 del snap
                 continue
 
+            print(f'  Main halo: {main_halonum} (majority vote)')
             pynbody.analysis.halo.center(main_h)
             r200_main = get_r200(main_h)
             if r200_main is None or r200_main <= 0:
@@ -470,6 +472,8 @@ def main():
                 print(f'  No DM particles within search radius, skipping')
                 del snap, dm_within
                 continue
+
+            print(f'  r200={r200_main:.1f} kpc, {len(iords_all)} DM particles in search sphere')
 
             grp = h5f.require_group(output)
             claimed_iords = set()
