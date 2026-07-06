@@ -241,7 +241,7 @@ def be_tag_multi_instance(
                     print(e, 'no darklight stars')
                     continue
 
-                if len(mstar_merging) == 0 or not any(np.asarray(mstar_merging) > 0):
+                if len(mstar_merging) == 0 or not np.any(np.asarray(mstar_merging) > 0):
                     continue
 
                 mass_select_merge = mstar_merging[-1]
