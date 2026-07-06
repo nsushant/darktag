@@ -235,7 +235,7 @@ def be_tag_multi_instance(
 
                 try:
                     t_2, _, _, _, mstar_in2, mstar_merging = DarkLight(
-                        hDM, DMO=True, mergers=True, n=config.get('darklight', 'n')
+                        hDM, DMO=True, mergers=True, n=1
                     )
                 except Exception as e:
                     print(e, 'no darklight stars')
@@ -244,7 +244,7 @@ def be_tag_multi_instance(
                 if len(mstar_merging) == 0 or not np.any(np.asarray(mstar_merging) > 0):
                     continue
 
-                mass_select_merge = mstar_merging[-1]
+                mass_select_merge = float(np.asarray(mstar_merging).flat[-1])
                 if int(mass_select_merge) < 1:
                     continue
 
@@ -270,7 +270,7 @@ def be_tag_multi_instance(
                     t_mk, _, _, _, _, mstar_mk = dl_merge_histories[k]
                     if len(mstar_mk) == 0:
                         continue
-                    mass_mk = mstar_mk[-1]
+                    mass_mk = float(np.asarray(mstar_mk).flat[-1])
                     if int(mass_mk) < 1:
                         continue
                     if np.random.random() > prob_occupied:
@@ -287,8 +287,7 @@ def be_tag_multi_instance(
                     })
                     row.to_csv(filenames[k], mode='a', header=False)
 
-        if 'DMOparticles' in dir():
-            del DMOparticles
+        del DMOparticles
 
         print('Done with iteration', i)
 
