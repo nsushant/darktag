@@ -264,8 +264,10 @@ def main():
                 del snap
                 continue
 
-            # Write to HDF5
-            grp = hf.require_group(output)
+            # Write to HDF5 — delete any partial group first to avoid "name already exists"
+            if output in hf:
+                del hf[output]
+            grp = hf.create_group(output)
             grp.create_dataset('iords',        data=iords)
             grp.create_dataset('total_energy', data=total_e)
             grp.create_dataset('pe',           data=pe)
