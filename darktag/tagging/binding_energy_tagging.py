@@ -294,6 +294,222 @@ def be_tag_multi_instance(
     return filenames
 
 
+def be_tag_multi_instance_hydro_dm(
+    HYDROsim,
+    n_instances,
+    be_cache,
+    halonumber=1,
+    free_param_value=0.01,
+    output_prefix=None,
+    mergers=True,
+    track_cluster_file=None,
+):
+    """
+    Multi-instance BE tagging on HYDRO simulation DM particles using DarkLight.
+
+    Identical to be_tag_multi_instance but:
+      - loads HYDRO snapshots and filters to .dm particles
+      - calls DarkLight with DMO=False
+      - insitu: BE cache first, falls back to rank_order_particles_by_BE on the fly
+      - mergers: rank_order_particles_by_BE always
+    """
+    DMOname = HYDROsim.path
+    t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halonumber)
+
+    _tc_halonum_map   = None
+    cluster_iords_map = None
+    if track_cluster_file is not None:
+        import h5py as _h5
+        _tc_data = {}
+        with _h5.File(track_cluster_file, 'r') as f:
+            for snap in f.keys():
+                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
+                    _tc_data[snap] = {
+                        'halonum': int(f[snap]['main']['halonum'][()]),
+                        'iords':   f[snap]['main']['iords'][:],
+                    }
+        _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
+        cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
+        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots')
+
+    print(f'Running DarkLight (DMO=False) {n_instances} time(s) for main halo...')
+    dl_histories = [
+        DarkLight(main_halo, DMO=False, n=1, mergers=False)
+        for _ in range(n_instances)
+    ]
+
+    zmerge, qmerge, hmerge = get_mergers_of_major_progenitor(main_halo)
+    hmerge_added, z_set_vals = group_mergers(zmerge, hmerge)
+
+    if len(red_all) != len(outputs):
+        print('Warning: output array length does not match redshift/time arrays')
+
+    if output_prefix is None:
+        output_prefix = DMOname + '_hydrodm_tagged_be'
+    os.makedirs(output_prefix, exist_ok=True)
+
+    filenames = [os.path.join(output_prefix, f'instance_{k:03d}.csv') for k in range(n_instances)]
+    _header = pd.DataFrame({'iords': [], 'mstar': [], 't': [], 'z': [], 'type': []})
+    for fn in filenames:
+        _header.to_csv(fn, mode='w', header=True)
+
+    def _mstar_at(mstar_arr, t_dl, t_target):
+        idx = np.argmin(abs(t_dl - t_target))
+        arr = np.asarray(mstar_arr)
+        return float(np.mean(arr[:, idx] if arr.ndim == 2 else arr[idx]))
+
+    _hydro_base = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
+
+    for i in range(len(outputs)):
+        gc.collect()
+        print('Current snapshot -->', outputs[i])
+
+        hDMO  = tangos.get_halo(DMOname + '/' + outputs[i] + '/halo_' + str(halonums[i]))
+        z_val = red_all[i]
+        t_val = t_all[i]
+
+        mass_selects_insitu = []
+        for k in range(n_instances):
+            t_dl, _, _, _, mstar_s_k, _ = dl_histories[k]
+            msn = _mstar_at(mstar_s_k, t_dl, t_val)
+            if msn == 0:
+                mass_selects_insitu.append(0)
+                continue
+            msp = _mstar_at(mstar_s_k, t_dl, t_all[i - 1]) if i > 0 else 0.0
+            mass_selects_insitu.append(int(msn - msp))
+
+        merger_snap = (
+            mergers and (i + 1 < len(red_all)) and (red_all[i + 1] in z_set_vals)
+        )
+        need_snap = any(m > 0 for m in mass_selects_insitu) or merger_snap
+        if not need_snap:
+            print('Done with iteration', i)
+            continue
+
+        simfn = join(_hydro_base, DMOname, outputs[i])
+        try:
+            HYDROparticles = pynbody.load(simfn)
+            HYDROparticles.physical_units()
+        except Exception as e:
+            print(f'--> failed to load snapshot: {e}, skipping')
+            continue
+
+        if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+            pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
+        else:
+            pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+
+        # ── Insitu block ──────────────────────────────────────────────────────
+        if any(m > 0 for m in mass_selects_insitu):
+            try:
+                hDMO['r200c']
+            except Exception:
+                print("Couldn't load R200 at timestep:", i)
+                del HYDROparticles
+                continue
+
+            if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+            else:
+                h = HYDROparticles.halos()[int(halonums[i]) - 1]
+            pynbody.analysis.halo.center(h)
+
+            try:
+                r200c_pyn = pynbody.analysis.halo.virial_radius(
+                    h.d, overden=200, r_max=None, rho_def='critical')
+            except Exception:
+                print('could not calculate R200c')
+                del HYDROparticles
+                continue
+
+            dm_within = HYDROparticles.dm[
+                sqrt(HYDROparticles.dm['pos'][:, 0] ** 2
+                     + HYDROparticles.dm['pos'][:, 1] ** 2
+                     + HYDROparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
+            ]
+            if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+                dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
+
+            parts_sorted = rank_order_particles_from_be_cache(outputs[i], be_cache, None)
+            if parts_sorted is not None and cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+                parts_sorted = parts_sorted[np.isin(parts_sorted, cluster_iords_map[outputs[i]])]
+            if parts_sorted is None:
+                print(f'  {outputs[i]} not in BE cache, computing BE on the fly')
+                parts_sorted = rank_order_particles_by_BE(dm_within, hDMO)
+            del dm_within
+
+            if parts_sorted.shape[0] > 0:
+                for k in range(n_instances):
+                    if mass_selects_insitu[k] > 0:
+                        arr = assign_stars_to_particles(
+                            mass_selects_insitu[k], parts_sorted, float(free_param_value))
+                        row = pd.DataFrame({
+                            'iords': arr[0],
+                            'mstar': arr[1],
+                            't':     np.repeat(t_val, len(arr[0])),
+                            'z':     np.repeat(z_val, len(arr[0])),
+                            'type':  np.repeat('insitu', len(arr[0])),
+                        })
+                        row.to_csv(filenames[k], mode='a', header=False)
+
+        # ── Merger block ──────────────────────────────────────────────────────
+        if merger_snap:
+            t_id = int(np.where(z_set_vals == red_all[i + 1])[0][0])
+            for hDM in hmerge_added[t_id][0]:
+                gc.collect()
+                try:
+                    h_merge = HYDROparticles.halos()[int(hDM.calculate('halo_number()')) - 1]
+                    pynbody.analysis.halo.center(h_merge.dm)
+                    r200c_acc = pynbody.analysis.halo.virial_radius(
+                        h_merge.d, overden=200, r_max=None, rho_def='critical')
+                except Exception as ex:
+                    print('centering data unavailable, skipping', ex)
+                    continue
+
+                dm_acc = HYDROparticles.dm[
+                    sqrt(HYDROparticles.dm['pos'][:, 0] ** 2
+                         + HYDROparticles.dm['pos'][:, 1] ** 2
+                         + HYDROparticles.dm['pos'][:, 2] ** 2) <= r200c_acc
+                ]
+                acc_sorted = rank_order_particles_by_BE(dm_acc, hDM)
+                del dm_acc
+
+                if acc_sorted.shape[0] == 0:
+                    continue
+
+                for k in range(n_instances):
+                    try:
+                        _, _, _, _, _, mstar_merging_k = DarkLight(hDM, DMO=False, n=1, mergers=True)
+                        if np.asarray(mstar_merging_k).size == 0:
+                            continue
+                    except Exception as e:
+                        print(e, '-- skipping instance', k)
+                        continue
+
+                    mass_merge_k = float(np.asarray(mstar_merging_k).flat[-1])
+                    if int(mass_merge_k) < 1:
+                        continue
+
+                    arr = assign_stars_to_particles(
+                        int(mass_merge_k), acc_sorted, float(free_param_value))
+                    row = pd.DataFrame({
+                        'iords': arr[0],
+                        'mstar': arr[1],
+                        't':     np.repeat(t_val, len(arr[0])),
+                        'z':     np.repeat(z_val, len(arr[0])),
+                        'type':  np.repeat('accreted', len(arr[0])),
+                    })
+                    row.to_csv(filenames[k], mode='a', header=False)
+
+        del HYDROparticles
+        print('Done with iteration', i)
+
+    print(f'\nFinished. Wrote {n_instances} output files:')
+    for fn in filenames:
+        print(' ', fn)
+    return filenames
+
+
 def rank_order_particles_by_BE(particles, hDMO,path_to_pe_file = None):
     
     print("tagging with BE")

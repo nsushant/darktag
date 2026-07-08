@@ -4,11 +4,11 @@ Calculate half-light and half-mass radii directly from HYDRO stellar particles.
 No tagging required — deterministic single output CSV.
 Applies edge_tangos_properties metallicity corrections, then uses
 pynbody.analysis.luminosity.half_light_r for the halflight radius.
-Voxel clustering isolates the main galaxy from satellites inside r200c.
+DBSCAN clustering isolates the main galaxy from satellites inside r200c.
 
 Usage:
     python scripts/run_reff_hydro_stars.py Halo1459_HYDRO_Mreionx02
-    python scripts/run_reff_hydro_stars.py Halo1459_HYDRO_Mreionx02 --voxel-size 0.08 --max-degree 20
+    python scripts/run_reff_hydro_stars.py Halo1459_HYDRO_Mreionx02 --dbscan-eps 1.0
     python scripts/run_reff_hydro_stars.py Halo1459_HYDRO_Mreionx02 --db-name Halo1459
 """
 
@@ -36,13 +36,11 @@ def main():
     parser.add_argument('--output-csv', type=str, default=None,
                         help='Output CSV path (default: <sim_name>_hydro_reffs.csv)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
-                        help='Disable voxel clustering')
-    parser.add_argument('--voxel-size', type=float, default=0.08,
-                        help='Voxel edge length in kpc (default: 0.08)')
-    parser.add_argument('--max-degree', type=int, default=20,
-                        help='Max voxel connectivity radius in steps (default: 20)')
-    parser.add_argument('--size-jump', type=float, default=2.0,
-                        help='Cluster size ratio signalling satellite absorption (default: 2.0)')
+                        help='Disable DBSCAN clustering')
+    parser.add_argument('--dbscan-eps', type=float, default=1.0,
+                        help='DBSCAN neighbourhood radius in kpc (default: 1.0)')
+    parser.add_argument('--dbscan-min-samples', type=int, default=5,
+                        help='DBSCAN minimum cluster size (default: 5)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--db-name', type=str, default=None,
@@ -68,10 +66,9 @@ def main():
         output_fname=output_csv,
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
-        voxel_size_kpc=args.voxel_size,
-        max_degree=args.max_degree,
-        size_jump=args.size_jump,
         track_cluster_file=args.track_cluster_file,
+        dbscan_eps=args.dbscan_eps,
+        dbscan_min_samples=args.dbscan_min_samples,
     )
 
     print(f'\nDone. Wrote {len(df)} snapshots to {output_csv}')

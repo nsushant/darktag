@@ -32,13 +32,11 @@ def main():
     parser.add_argument('--output-dir', type=str, default=None,
                         help='Directory for output reff CSVs (default: <tagged-dir>_reffs)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
-                        help='Disable voxel clustering when calculating reffs')
-    parser.add_argument('--voxel-size', type=float, default=0.08,
-                        help='Voxel edge length in kpc (default: 0.08)')
-    parser.add_argument('--max-degree', type=int, default=20,
-                        help='Max voxel connectivity radius in steps (default: 20)')
-    parser.add_argument('--size-jump', type=float, default=2.0,
-                        help='Cluster size ratio that signals satellite absorption (default: 2.0)')
+                        help='Disable DBSCAN clustering when calculating reffs')
+    parser.add_argument('--dbscan-eps', type=float, default=1.0,
+                        help='DBSCAN neighbourhood radius in kpc (default: 1.0)')
+    parser.add_argument('--dbscan-min-samples', type=int, default=5,
+                        help='DBSCAN minimum cluster size (default: 5)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--track-cluster-file', type=str, default=None,
@@ -55,23 +53,30 @@ def main():
     tangos.core.init_db(pjoin(tangos_path, sim_name.split('_')[0] + '.db'))
     sim = tangos.get_simulation(sim_name)
 
-    if not os.path.isdir(args.tagged_dir):
-        print(f'Error: {args.tagged_dir} is not a directory.')
+    # Accept a single CSV file — copy it into a temp dir as instance_000.csv
+    tagged_dir = args.tagged_dir
+    _tmp_dir   = None
+    if os.path.isfile(tagged_dir) and tagged_dir.endswith('.csv'):
+        import tempfile, shutil
+        _tmp_dir   = tempfile.mkdtemp()
+        shutil.copy(tagged_dir, os.path.join(_tmp_dir, 'instance_000.csv'))
+        tagged_dir = _tmp_dir
+    elif not os.path.isdir(tagged_dir):
+        print(f'Error: {tagged_dir} is not a directory or CSV file.')
         sys.exit(1)
 
     dfs = calculate_reffs_multi_instance(
         DMOsim=sim,
-        tagged_dir=args.tagged_dir,
+        tagged_dir=tagged_dir,
         pynbody_path=pynbody_path,
         halo_number=args.halonumber,
         output_dir=args.output_dir,
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
-        voxel_size_kpc=args.voxel_size,
-        max_degree=args.max_degree,
-        size_jump=args.size_jump,
         track_cluster_file=args.track_cluster_file,
         max_instances=args.max_instances,
+        dbscan_eps=args.dbscan_eps,
+        dbscan_min_samples=args.dbscan_min_samples,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'

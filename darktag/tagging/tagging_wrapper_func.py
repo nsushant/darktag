@@ -535,6 +535,8 @@ def calculate_reffs_multi_instance(
     size_jump=2.0,
     track_cluster_file=None,
     max_instances=None,
+    dbscan_eps=1.0,
+    dbscan_min_samples=5,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -763,18 +765,20 @@ def calculate_reffs_multi_instance(
             if len(particle_sel_k) == 0:
                 continue
 
-            # Voxel clustering with this instance's own PrevVoxelIords
+            # DBSCAN clustering with this instance's own PrevVoxelIords
             if use_clustering:
-                pos_k   = np.array(particle_sel_k['pos'])
-                iords_k = np.asarray(particle_sel_k['iord'])
-                mask_k  = _voxel_pick_cluster(
-                    pos_k, iords_k, float(voxel_size_kpc),
-                    prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
-                    max_degree=max_degree,
-                    size_jump=size_jump,
+                prev_iords_k = PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None
+                labels_k, best_label_k, _ = cluster_tagged_particles(
+                    particle_sel_k,
+                    prev_iords=prev_iords_k,
+                    method='dbscan',
+                    feature_cols=['x', 'y', 'z'],
+                    eps=dbscan_eps,
+                    dbscan_min_samples=dbscan_min_samples,
                 )
-                if mask_k is None or mask_k.sum() == 0:
+                if best_label_k == -1:
                     continue
+                mask_k            = labels_k == best_label_k
                 particle_sel_k    = particle_sel_k[mask_k]
                 PrevVoxelIords[k] = np.asarray(particle_sel_k['iord'])
                 # restrict insitu to the cluster
@@ -859,6 +863,8 @@ def calculate_reffs_hydro_stars(
     max_degree=20,
     size_jump=2.0,
     track_cluster_file=None,
+    dbscan_eps=1.0,
+    dbscan_min_samples=5,
 ):
     '''
     Calculate half-light and half-mass radii directly from HYDRO stellar particles.
@@ -1013,21 +1019,23 @@ def calculate_reffs_hydro_stars(
             print('  No stellar particles after metallicity filter, skipping')
             continue
 
-        # Voxel clustering to isolate main galaxy
+        # DBSCAN clustering to isolate main galaxy from satellites
         if use_clustering:
-            pos_st   = np.array(stars['pos'])
-            iords_st = np.asarray(stars['iord'])
-            mask_st  = _voxel_pick_cluster(
-                pos_st, iords_st, float(voxel_size_kpc),
-                prev_iords=PrevVoxelIords if len(PrevVoxelIords) > 0 else None,
-                max_degree=max_degree,
-                size_jump=size_jump,
+            prev_iords_for_cluster = PrevVoxelIords if len(PrevVoxelIords) > 0 else None
+            labels, best_label, _ = cluster_tagged_particles(
+                stars,
+                prev_iords=prev_iords_for_cluster,
+                method='dbscan',
+                feature_cols=['x', 'y', 'z'],
+                eps=dbscan_eps,
+                dbscan_min_samples=dbscan_min_samples,
             )
-            if mask_st is None or mask_st.sum() == 0:
-                print('  Voxel clustering returned empty cluster, skipping')
+            if best_label == -1:
+                print('  DBSCAN: no cluster found, skipping')
                 continue
-            cluster_stars   = stars[mask_st]
-            PrevVoxelIords  = np.asarray(cluster_stars['iord'])
+            mask_st       = labels == best_label
+            cluster_stars = stars[mask_st]
+            PrevVoxelIords = np.asarray(cluster_stars['iord'])
         else:
             cluster_stars = stars
 
