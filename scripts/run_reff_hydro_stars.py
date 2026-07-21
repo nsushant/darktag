@@ -36,11 +36,11 @@ def main():
     parser.add_argument('--output-csv', type=str, default=None,
                         help='Output CSV path (default: <sim_name>_hydro_reffs.csv)')
     parser.add_argument('--no-clustering', action='store_true', default=False,
-                        help='Disable DBSCAN clustering')
-    parser.add_argument('--dbscan-eps', type=float, default=1.0,
-                        help='DBSCAN neighbourhood radius in kpc (default: 1.0)')
-    parser.add_argument('--dbscan-min-samples', type=int, default=5,
-                        help='DBSCAN minimum cluster size (default: 5)')
+                        help='Disable density region growing')
+    parser.add_argument('--voxel-size', type=float, default=0.08,
+                        help='Voxel edge length in kpc for region growing (default: 0.08)')
+    parser.add_argument('--density-threshold', type=float, default=1.5,
+                        help='Stop growing when shell would increase region density by this factor (default: 1.5)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--db-name', type=str, default=None,
@@ -67,8 +67,8 @@ def main():
         use_clustering=not args.no_clustering,
         use_ahf=args.ahf,
         track_cluster_file=args.track_cluster_file,
-        dbscan_eps=args.dbscan_eps,
-        dbscan_min_samples=args.dbscan_min_samples,
+        voxel_size_kpc=args.voxel_size,
+        density_threshold=args.density_threshold,
     )
 
     print(f'\nDone. Wrote {len(df)} snapshots to {output_csv}')

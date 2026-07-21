@@ -113,6 +113,116 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
     del expanded
     return best_mask
 
+
+def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
+                         density_threshold=1.5):
+    """
+    Region-growing clustering with density-based stopping criterion.
+
+    Voxelises particle positions, seeds from the centroid of prev_iords
+    (or the densest voxel), then grows outward one shell at a time via
+    binary_dilation. Only occupied voxels are added to the region.
+
+    Growth stops when adding the next shell would cause the region's
+    average density (particles / occupied voxels) to exceed
+    density_threshold × the current region density.
+
+    Parameters
+    ----------
+    positions         : (N, 3) float array – positions in kpc
+    iords             : (N,) int array
+    voxel_size        : float – voxel edge in kpc
+    prev_iords        : array-like or None – iords from previous snapshot for seeding
+    density_threshold : float – max allowed density ratio when adding a shell (default 1.5)
+
+    Returns
+    -------
+    mask : (N,) bool array, or None if no particles found
+    """
+    from scipy.ndimage import binary_dilation
+
+    if len(positions) == 0:
+        return None
+
+    vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
+    vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
+    vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
+
+    ox, oy, oz = int(vx.min()), int(vy.min()), int(vz.min())
+    gx = (vx - ox).astype(np.int32)
+    gy = (vy - oy).astype(np.int32)
+    gz = (vz - oz).astype(np.int32)
+    del vx, vy, vz
+
+    nx, ny, nz = int(gx.max()) + 1, int(gy.max()) + 1, int(gz.max()) + 1
+
+    # Count grid: number of particles per voxel
+    count_grid = np.zeros((nx, ny, nz), dtype=np.int32)
+    np.add.at(count_grid, (gx, gy, gz), 1)
+    occupied = count_grid > 0
+
+    # Find seed voxel
+    if prev_iords is not None and len(prev_iords) > 0:
+        in_prev = np.isin(iords, prev_iords)
+        if in_prev.any():
+            centroid = positions[in_prev].mean(axis=0)
+            sx = int(np.floor(centroid[0] / voxel_size)) - ox
+            sy = int(np.floor(centroid[1] / voxel_size)) - oy
+            sz = int(np.floor(centroid[2] / voxel_size)) - oz
+            sx = np.clip(sx, 0, nx - 1)
+            sy = np.clip(sy, 0, ny - 1)
+            sz = np.clip(sz, 0, nz - 1)
+            seed = (sx, sy, sz)
+        else:
+            seed = np.unravel_index(count_grid.argmax(), count_grid.shape)
+    else:
+        seed = np.unravel_index(count_grid.argmax(), count_grid.shape)
+
+    # Initialise region with seed voxel
+    region = np.zeros((nx, ny, nz), dtype=bool)
+    region[seed] = True
+
+    region_particles = int(count_grid[seed])
+    region_voxels = 1
+    current_density = float(region_particles) / region_voxels if region_voxels > 0 else 0.0
+
+    structure3 = np.ones((3, 3, 3), dtype=bool)
+
+    # Grow shell by shell
+    for step in range(max(nx, ny, nz)):
+        # Dilate region by one shell
+        expanded = binary_dilation(region, structure=structure3, iterations=1)
+        new_shell = expanded & ~region & occupied
+
+        if not new_shell.any():
+            break
+
+        shell_particles = int(count_grid[new_shell].sum())
+        shell_voxels = int(new_shell.sum())
+
+        new_total_p = region_particles + shell_particles
+        new_total_v = region_voxels + shell_voxels
+        new_density = float(new_total_p) / new_total_v
+
+        if current_density > 0 and new_density > current_density * density_threshold:
+            print(f'    region grow: shell {step + 1} would increase density '
+                  f'{current_density:.2f} → {new_density:.2f} '
+                  f'(×{new_density / current_density:.2f}), stopping')
+            break
+
+        region |= new_shell
+        region_particles = new_total_p
+        region_voxels = new_total_v
+        current_density = new_density
+
+    print(f'    region grow: {region_particles} particles in {region_voxels} voxels '
+          f'after {step + 1} shells')
+
+    # Map back to particles
+    mask = region[gx, gy, gz]
+    return mask
+
+
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
 
     '''
@@ -535,8 +645,7 @@ def calculate_reffs_multi_instance(
     size_jump=2.0,
     track_cluster_file=None,
     max_instances=None,
-    dbscan_eps=1.0,
-    dbscan_min_samples=5,
+    density_threshold=1.5,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -765,20 +874,17 @@ def calculate_reffs_multi_instance(
             if len(particle_sel_k) == 0:
                 continue
 
-            # DBSCAN clustering with this instance's own PrevVoxelIords
+            # Density region growing with this instance's own PrevVoxelIords
             if use_clustering:
-                prev_iords_k = PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None
-                labels_k, best_label_k, _ = cluster_tagged_particles(
-                    particle_sel_k,
-                    prev_iords=prev_iords_k,
-                    method='dbscan',
-                    feature_cols=['x', 'y', 'z'],
-                    eps=dbscan_eps,
-                    dbscan_min_samples=dbscan_min_samples,
+                pos_k   = np.array(particle_sel_k['pos'])
+                iords_k = np.asarray(particle_sel_k['iord'])
+                mask_k  = _density_region_grow(
+                    pos_k, iords_k, float(voxel_size_kpc),
+                    prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
+                    density_threshold=density_threshold,
                 )
-                if best_label_k == -1:
+                if mask_k is None or mask_k.sum() == 0:
                     continue
-                mask_k            = labels_k == best_label_k
                 particle_sel_k    = particle_sel_k[mask_k]
                 PrevVoxelIords[k] = np.asarray(particle_sel_k['iord'])
                 # restrict insitu to the cluster
@@ -863,8 +969,7 @@ def calculate_reffs_hydro_stars(
     max_degree=20,
     size_jump=2.0,
     track_cluster_file=None,
-    dbscan_eps=1.0,
-    dbscan_min_samples=5,
+    density_threshold=1.5,
 ):
     '''
     Calculate half-light and half-mass radii directly from HYDRO stellar particles.
@@ -1019,22 +1124,19 @@ def calculate_reffs_hydro_stars(
             print('  No stellar particles after metallicity filter, skipping')
             continue
 
-        # DBSCAN clustering to isolate main galaxy from satellites
+        # Density region growing to isolate main galaxy from satellites
         if use_clustering:
-            prev_iords_for_cluster = PrevVoxelIords if len(PrevVoxelIords) > 0 else None
-            labels, best_label, _ = cluster_tagged_particles(
-                stars,
-                prev_iords=prev_iords_for_cluster,
-                method='dbscan',
-                feature_cols=['x', 'y', 'z'],
-                eps=dbscan_eps,
-                dbscan_min_samples=dbscan_min_samples,
+            pos_st   = np.array(stars['pos'])
+            iords_st = np.asarray(stars['iord'])
+            mask_st  = _density_region_grow(
+                pos_st, iords_st, float(voxel_size_kpc),
+                prev_iords=PrevVoxelIords if len(PrevVoxelIords) > 0 else None,
+                density_threshold=density_threshold,
             )
-            if best_label == -1:
-                print('  DBSCAN: no cluster found, skipping')
+            if mask_st is None or mask_st.sum() == 0:
+                print('  Region growing returned empty cluster, skipping')
                 continue
-            mask_st       = labels == best_label
-            cluster_stars = stars[mask_st]
+            cluster_stars  = stars[mask_st]
             PrevVoxelIords = np.asarray(cluster_stars['iord'])
         else:
             cluster_stars = stars

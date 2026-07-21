@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.expanduser('~'))
 sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..')))
 
 from darktag.config import config
-from darktag.tagging.tagging_wrapper_func import _voxel_pick_cluster
+from darktag.tagging.tagging_wrapper_func import _density_region_grow
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -238,12 +238,10 @@ def main():
     parser.add_argument('sim_name', help='Simulation name (e.g. Halo1459_DMO or Halo1459_HYDRO_Mreionx02)')
     parser.add_argument('--halonumber', type=int, default=1,
                         help='Halo index at z=0 to seed main branch (default: 1)')
-    parser.add_argument('--voxel-size', type=float, default=0.5,
-                        help='Fixed voxel edge length in kpc (default: 0.5)')
-    parser.add_argument('--max-degree', type=int, default=20,
-                        help='Max voxel connectivity steps for iterative expansion (default: 20)')
-    parser.add_argument('--size-jump', type=float, default=2.0,
-                        help='Cluster size ratio that signals satellite absorption (default: 2.0)')
+    parser.add_argument('--voxel-size', type=float, default=0.2,
+                        help='Fixed voxel edge length in kpc (default: 0.2)')
+    parser.add_argument('--density-threshold', type=float, default=1.5,
+                        help='Stop region growing when shell would increase density by this factor (default: 1.5)')
     parser.add_argument('--search-radius', type=float, default=3.0,
                         help='Load DM within this × r200_main of main centroid (default: 3.0)')
     parser.add_argument('--min-satellite-particles', type=int, default=100,
@@ -269,12 +267,11 @@ def main():
                         help='Output HDF5 path (default: <sim_name>_cluster_tree.hdf5)')
     args = parser.parse_args()
 
-    sim_name        = args.sim_name
-    halonumber      = args.halonumber
-    voxel_size      = args.voxel_size
-    max_degree      = args.max_degree
-    size_jump       = args.size_jump
-    search_rad      = args.search_radius
+    sim_name           = args.sim_name
+    halonumber         = args.halonumber
+    voxel_size         = args.voxel_size
+    density_threshold  = args.density_threshold
+    search_rad         = args.search_radius
     min_sat_p       = args.min_satellite_particles
     window          = args.halo_search_window
     sat_degree      = args.sat_discovery_degree
@@ -302,7 +299,7 @@ def main():
 
     print(f'Found {len(outputs)} snapshots in {pynbody_path}')
     print(f'Output: {output_path}')
-    print(f'Voxel size: {voxel_size} kpc, max_degree: {max_degree}, size_jump: {size_jump}')
+    print(f'Voxel size: {voxel_size} kpc, density_threshold: {density_threshold}')
 
     # ── Resume ────────────────────────────────────────────────────────────────
     active_branches = {}
@@ -399,9 +396,9 @@ def main():
                 seed_pos   = positions[seed_mask]
                 seed_iords = iords_all[seed_mask]
 
-                mask = _voxel_pick_cluster(
+                mask = _density_region_grow(
                     seed_pos, seed_iords, voxel_size,
-                    prev_iords=None, max_degree=max_degree, size_jump=size_jump,
+                    prev_iords=None, density_threshold=density_threshold,
                 )
                 if mask is None or mask.sum() == 0:
                     print(f'  Seed clustering failed, skipping')
@@ -490,11 +487,10 @@ def main():
                 clip_pos, clip_iords = clip_to_cluster(
                     positions, iords_all, branch['prev_iords'])
 
-                mask = _voxel_pick_cluster(
+                mask = _density_region_grow(
                     clip_pos, clip_iords, voxel_size,
                     prev_iords=branch['prev_iords'],
-                    max_degree=max_degree,
-                    size_jump=size_jump,
+                    density_threshold=density_threshold,
                 )
 
                 if mask is None or mask.sum() == 0:
