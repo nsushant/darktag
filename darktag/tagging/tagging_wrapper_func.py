@@ -115,25 +115,27 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
 
 
 def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
-                         density_threshold=1.5):
+                         n_seeds=3, min_shells=3):
     """
-    Region-growing clustering with density-based stopping criterion.
+    Region-growing clustering using cumulative density profile minima.
 
-    Voxelises particle positions, seeds from the centroid of prev_iords
-    (or the densest voxel), then grows outward one shell at a time via
-    binary_dilation. Only occupied voxels are added to the region.
+    Voxelises particle positions, then grows regions from the n_seeds
+    densest voxels (each picked after excluding previous regions).
+    For each seed, grows outward shell by shell via binary_dilation,
+    tracking cumulative density (total particles / total occupied voxels).
+    Growth is cut at the first cumulative density minimum after min_shells.
 
-    Growth stops when adding the next shell would cause the region's
-    average density (particles / occupied voxels) to exceed
-    density_threshold × the current region density.
+    The winner is selected by overlap with prev_iords (or largest region
+    if prev_iords is not available).
 
     Parameters
     ----------
-    positions         : (N, 3) float array – positions in kpc
-    iords             : (N,) int array
-    voxel_size        : float – voxel edge in kpc
-    prev_iords        : array-like or None – iords from previous snapshot for seeding
-    density_threshold : float – max allowed density ratio when adding a shell (default 1.5)
+    positions  : (N, 3) float array – positions in kpc
+    iords      : (N,) int array
+    voxel_size : float – voxel edge in kpc
+    prev_iords : array-like or None – iords from previous snapshot
+    n_seeds    : int – number of density peaks to try (default 3)
+    min_shells : int – minimum shells before allowing a cut (default 3)
 
     Returns
     -------
@@ -161,66 +163,103 @@ def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
     np.add.at(count_grid, (gx, gy, gz), 1)
     occupied = count_grid > 0
 
-    # Find seed voxel
-    if prev_iords is not None and len(prev_iords) > 0:
-        in_prev = np.isin(iords, prev_iords)
-        if in_prev.any():
-            centroid = positions[in_prev].mean(axis=0)
-            sx = int(np.floor(centroid[0] / voxel_size)) - ox
-            sy = int(np.floor(centroid[1] / voxel_size)) - oy
-            sz = int(np.floor(centroid[2] / voxel_size)) - oz
-            sx = np.clip(sx, 0, nx - 1)
-            sy = np.clip(sy, 0, ny - 1)
-            sz = np.clip(sz, 0, nz - 1)
-            seed = (sx, sy, sz)
-        else:
-            seed = np.unravel_index(count_grid.argmax(), count_grid.shape)
-    else:
-        seed = np.unravel_index(count_grid.argmax(), count_grid.shape)
-
-    # Initialise region with seed voxel
-    region = np.zeros((nx, ny, nz), dtype=bool)
-    region[seed] = True
-
-    region_particles = int(count_grid[seed])
-    region_voxels = 1
-    current_density = float(region_particles) / region_voxels if region_voxels > 0 else 0.0
-
     structure3 = np.ones((3, 3, 3), dtype=bool)
+    max_steps = max(nx, ny, nz)
 
-    # Grow shell by shell
-    for step in range(max(nx, ny, nz)):
-        # Dilate region by one shell
-        expanded = binary_dilation(region, structure=structure3, iterations=1)
-        new_shell = expanded & ~region & occupied
+    # Track which voxels have been claimed by previous seed regions
+    excluded = np.zeros((nx, ny, nz), dtype=bool)
 
-        if not new_shell.any():
+    candidate_regions = []
+
+    for seed_idx in range(n_seeds):
+        # Find densest voxel not in any previous region
+        search_grid = count_grid.copy()
+        search_grid[excluded] = 0
+        if search_grid.max() == 0:
             break
+        seed = np.unravel_index(search_grid.argmax(), search_grid.shape)
 
-        shell_particles = int(count_grid[new_shell].sum())
-        shell_voxels = int(new_shell.sum())
+        # Pass 1: grow all shells, record cumulative density per step
+        region = np.zeros((nx, ny, nz), dtype=bool)
+        region[seed] = True
+        total_p = int(count_grid[seed])
+        total_v = 1
+        cum_densities = [float(total_p) / total_v]
+        n_shells = 0
 
-        new_total_p = region_particles + shell_particles
-        new_total_v = region_voxels + shell_voxels
-        new_density = float(new_total_p) / new_total_v
+        for step in range(max_steps):
+            expanded = binary_dilation(region, structure=structure3, iterations=1)
+            new_shell = expanded & ~region & occupied
+            if not new_shell.any():
+                break
+            shell_p = int(count_grid[new_shell].sum())
+            shell_v = int(new_shell.sum())
+            total_p += shell_p
+            total_v += shell_v
+            cum_densities.append(float(total_p) / total_v)
+            region |= new_shell
+            n_shells += 1
 
-        if current_density > 0 and new_density > current_density * density_threshold:
-            print(f'    region grow: shell {step + 1} would increase density '
-                  f'{current_density:.2f} → {new_density:.2f} '
-                  f'(×{new_density / current_density:.2f}), stopping')
-            break
+        # Find cut: first minimum after min_shells
+        # A minimum is where cum_density[s] < cum_density[s+1]
+        cut_shell = n_shells  # default: keep everything
+        for s in range(min_shells, len(cum_densities) - 1):
+            if cum_densities[s] < cum_densities[s + 1]:
+                cut_shell = s
+                break
 
-        region |= new_shell
-        region_particles = new_total_p
-        region_voxels = new_total_v
-        current_density = new_density
+        # Pass 2: re-grow from seed, stop at cut_shell
+        region = np.zeros((nx, ny, nz), dtype=bool)
+        region[seed] = True
+        for step in range(cut_shell):
+            expanded = binary_dilation(region, structure=structure3, iterations=1)
+            new_shell = expanded & ~region & occupied
+            if not new_shell.any():
+                break
+            region |= new_shell
 
-    print(f'    region grow: {region_particles} particles in {region_voxels} voxels '
-          f'after {step + 1} shells')
+        region_particle_count = int(count_grid[region].sum())
 
-    # Map back to particles
-    mask = region[gx, gy, gz]
-    return mask
+        # Exclude this region's voxels from future seeds
+        excluded |= region
+
+        # Map region to particle mask
+        region_mask = region[gx, gy, gz]
+        region_iords = iords[region_mask]
+
+        candidate_regions.append({
+            'mask': region_mask,
+            'iords': region_iords,
+            'n_particles': region_particle_count,
+            'cut_shell': cut_shell,
+            'n_shells_total': n_shells,
+            'seed_idx': seed_idx,
+        })
+
+    if not candidate_regions:
+        return None
+
+    # Select winner
+    if prev_iords is not None and len(prev_iords) > 0:
+        prev_set = set(np.asarray(prev_iords).ravel())
+        best_idx = 0
+        best_overlap = -1
+        for i, cand in enumerate(candidate_regions):
+            overlap = sum(1 for iord in cand['iords'] if iord in prev_set)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_idx = i
+        winner = candidate_regions[best_idx]
+        print(f'    region grow: seed {winner["seed_idx"]}, '
+              f'{winner["n_particles"]} particles, cut at shell {winner["cut_shell"]}'
+              f'/{winner["n_shells_total"]}, overlap {best_overlap}')
+    else:
+        winner = max(candidate_regions, key=lambda c: c['n_particles'])
+        print(f'    region grow: seed {winner["seed_idx"]}, '
+              f'{winner["n_particles"]} particles, cut at shell {winner["cut_shell"]}'
+              f'/{winner["n_shells_total"]} (largest)')
+
+    return winner['mask']
 
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
@@ -641,11 +680,10 @@ def calculate_reffs_multi_instance(
     use_clustering=True,
     use_ahf=False,
     voxel_size_kpc=0.08,
-    max_degree=20,
-    size_jump=2.0,
     track_cluster_file=None,
     max_instances=None,
-    density_threshold=1.5,
+    n_seeds=3,
+    min_shells=3,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -664,8 +702,8 @@ def calculate_reffs_multi_instance(
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
         voxel_size_kpc    - voxel edge length in kpc (default 0.08)
-        max_degree        - maximum connectivity radius in voxel steps (default 20)
-        size_jump         - cluster size ratio that signals satellite absorption (default 2.0)
+        n_seeds           - number of density peaks to try for region growing (default 3)
+        min_shells        - minimum shells before allowing a density cut (default 3)
 
     Returns:
         list of reff DataFrames, one per instance
@@ -881,7 +919,7 @@ def calculate_reffs_multi_instance(
                 mask_k  = _density_region_grow(
                     pos_k, iords_k, float(voxel_size_kpc),
                     prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
-                    density_threshold=density_threshold,
+                    n_seeds=n_seeds, min_shells=min_shells,
                 )
                 if mask_k is None or mask_k.sum() == 0:
                     continue
@@ -966,10 +1004,9 @@ def calculate_reffs_hydro_stars(
     use_clustering=True,
     use_ahf=False,
     voxel_size_kpc=0.08,
-    max_degree=20,
-    size_jump=2.0,
     track_cluster_file=None,
-    density_threshold=1.5,
+    n_seeds=3,
+    min_shells=3,
 ):
     '''
     Calculate half-light and half-mass radii directly from HYDRO stellar particles.
@@ -977,7 +1014,7 @@ def calculate_reffs_hydro_stars(
     No tagging required — deterministic, single output CSV.
     Applies edge_tangos_properties metallicity corrections before luminosity calculation,
     then uses pynbody.analysis.luminosity.half_light_r for the halflight radius.
-    Voxel clustering isolates the main galaxy from satellites inside r200c.
+    Region growing clustering isolates the main galaxy from satellites inside r200c.
 
     Inputs:
         HYDROsim       - tangos simulation object (HYDRO)
@@ -985,11 +1022,11 @@ def calculate_reffs_hydro_stars(
         halo_number    - halo index (default 0)
         output_fname   - output CSV path (default: <sim_name>_hydro_reffs.csv)
         save_to_file   - write CSV incrementally (default True)
-        use_clustering - use iterative voxel clustering to exclude satellites (default True)
+        use_clustering - use region growing clustering to exclude satellites (default True)
         use_ahf        - use AHF catalogue instead of HOP (default False)
         voxel_size_kpc - voxel edge length in kpc (default 0.08)
-        max_degree     - max voxel connectivity radius in steps (default 20)
-        size_jump      - cluster size ratio signalling satellite absorption (default 2.0)
+        n_seeds        - number of density peaks to try for region growing (default 3)
+        min_shells     - minimum shells before allowing a density cut (default 3)
 
     Returns:
         DataFrame with columns: t, z, reff, halflight, kravtsov
@@ -1131,7 +1168,7 @@ def calculate_reffs_hydro_stars(
             mask_st  = _density_region_grow(
                 pos_st, iords_st, float(voxel_size_kpc),
                 prev_iords=PrevVoxelIords if len(PrevVoxelIords) > 0 else None,
-                density_threshold=density_threshold,
+                n_seeds=n_seeds, min_shells=min_shells,
             )
             if mask_st is None or mask_st.sum() == 0:
                 print('  Region growing returned empty cluster, skipping')

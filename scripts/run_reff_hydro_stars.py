@@ -39,8 +39,10 @@ def main():
                         help='Disable density region growing')
     parser.add_argument('--voxel-size', type=float, default=0.08,
                         help='Voxel edge length in kpc for region growing (default: 0.08)')
-    parser.add_argument('--density-threshold', type=float, default=1.5,
-                        help='Stop growing when shell would increase region density by this factor (default: 1.5)')
+    parser.add_argument('--n-seeds', type=int, default=3,
+                        help='Number of density peaks to try for region growing (default: 3)')
+    parser.add_argument('--min-shells', type=int, default=3,
+                        help='Minimum shells before allowing a density cut (default: 3)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--db-name', type=str, default=None,
@@ -68,7 +70,8 @@ def main():
         use_ahf=args.ahf,
         track_cluster_file=args.track_cluster_file,
         voxel_size_kpc=args.voxel_size,
-        density_threshold=args.density_threshold,
+        n_seeds=args.n_seeds,
+        min_shells=args.min_shells,
     )
 
     print(f'\nDone. Wrote {len(df)} snapshots to {output_csv}')
