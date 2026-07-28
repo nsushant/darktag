@@ -1,13 +1,13 @@
 """
-Multi-instance HYDRO DM tagging using simulation stellar masses (integrate_sfr).
+Multi-instance HYDRO DM tagging using stellar masses read directly from the AHF
+halo's star particles at each snapshot (h.st['mass'].sum()).
 
-Unlike the DarkLight variant, stellar mass is computed deterministically from the
-SFR histogram stored in tangos — no stochasticity per instance.
+Requires a track_cluster HDF5 file to provide AHF halonums per snapshot.
+This avoids dependence on the tangos merger tree.
 
 Usage:
-    python scripts/run_tag_hydro_mstars.py Halo1459_HYDRO --n-instances 50
-    python scripts/run_tag_hydro_mstars.py Halo1459_HYDRO --n-instances 50 --ftag 0.01
-    python scripts/run_tag_hydro_mstars.py Halo1459_HYDRO_Mreionx02 --n-instances 50 --db-name Halo1459
+    python scripts/run_tag_hydro_mstars.py Halo1459_HYDRO_Mreionx02 --n-instances 50 \
+        --track-cluster-file Halo1459_HYDRO_Mreionx02_cluster_tree.hdf5 --db-name Halo1459
 """
 
 import sys
@@ -40,8 +40,8 @@ def main():
                         help='Prefix for output filenames')
     parser.add_argument('--db-name', type=str, default=None,
                         help='Tangos DB filename stem (default: first _-delimited token of sim_name, e.g. Halo1459)')
-    parser.add_argument('--track-cluster-file', type=str, default=None,
-                        help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums + cluster iords')
+    parser.add_argument('--track-cluster-file', type=str, required=True,
+                        help='track_cluster HDF5 file (required — provides AHF halonums to read stellar mass from halo star particles)')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
