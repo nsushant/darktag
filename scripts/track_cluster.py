@@ -557,11 +557,9 @@ def main():
             print(f'  Main branch: {len(cluster_iords)} particles '
                   f'(hop={hop_halonum}, r200={r200_main:.1f} kpc, '
                   f'bounding_r={bounding_r:.2f} kpc)')
-                print(f'  Spawned new branch {sat_id}: {len(sat_iords)} particles '
-                      f'(halo {halonum_sat}, bounding_r={sat_bounding_r:.2f} kpc)')
 
             h5f.flush()
-            del snap, dm_within
+            del snap
 
     finally:
         h5f.close()
