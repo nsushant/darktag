@@ -39,7 +39,7 @@ from darktag.tagging.tagging_wrapper_func import _density_region_grow
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def clip_to_cluster(positions, iords, prev_iords, padding_factor=2.0, min_radius_kpc=100.0):
+def clip_to_cluster(positions, iords, prev_iords, padding_factor=2.0, min_radius_kpc=5.0):
     """
     Restrict positions/iords to a sphere around where the previous cluster iords
     currently are, with a padding_factor * bounding_radius buffer.
