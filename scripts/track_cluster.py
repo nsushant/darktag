@@ -241,23 +241,26 @@ def find_hop_halonum(snap, cluster_iords, max_halos=50):
         return None
 
     cluster_set = set(np.asarray(cluster_iords).ravel())
+    n_cluster = len(cluster_set)
     best_idx   = None
     best_score = 0
 
     for idx in range(min(max_halos, len(hop_cat))):
         try:
             h = hop_cat[idx]
-            overlap = sum(1 for iord in h.dm['iord'] if iord in cluster_set)
+            overlap = np.isin(np.asarray(h.dm['iord']), list(cluster_set)).sum()
             if overlap > best_score:
                 best_score = overlap
                 best_idx   = idx
+                if best_score > 0.5 * n_cluster:
+                    break
         except Exception:
             continue
 
     if best_idx is not None:
         # HOP catalogue is 0-indexed, tangos uses 1-based halo numbers
         hop_halonum = best_idx + 1
-        print(f'  HOP halo match: halo {hop_halonum} (overlap {best_score})')
+        print(f'  HOP halo match: halo {hop_halonum} (overlap {best_score}/{n_cluster})')
         return hop_halonum
     return None
 
@@ -473,133 +476,87 @@ def main():
 
             # ── SUBSEQUENT SNAPS ──────────────────────────────────────────────
 
-            main_h, main_halonum = majority_vote_halo(
-                halo_cat, active_branches['main']['prev_halonum'],
-                window,  active_branches['main']['prev_iords'],
-                prefer_stars=prefer_stars)
+            prev_iords = active_branches['main']['prev_iords']
 
-            if main_h is None and use_centroid:
-                prev_centroid = active_branches['main'].get('prev_centroid')
-                if prev_centroid is not None:
-                    print(f'  Main branch: majority vote failed, trying centroid fallback')
-                    main_h, main_halonum = centroid_fallback_halo(
-                        halo_cat, prev_centroid, active_branches['main']['prev_iords'],
-                        max_centroid_dist=centroid_max_dist)
-                    if main_h is not None:
-                        print(f'  Centroid fallback found halo {main_halonum}')
-
-            if main_h is None:
-                print(f'  Main branch: no matching halo found, skipping snap')
+            # Step 1: find prev_iords in this snapshot, center on them
+            all_dm_iords = np.array(snap.dm['iord'])
+            in_prev = np.isin(all_dm_iords, prev_iords)
+            if not in_prev.any():
+                print(f'  No previous particles found in snapshot, skipping')
                 del snap
                 continue
 
-            print(f'  Main halo: {main_halonum} (majority vote)')
-            pynbody.analysis.halo.center(main_h)
-            r200_main = get_r200(main_h)
+            prev_pos = np.array(snap.dm['pos'])[in_prev]
+            centroid_prev = prev_pos.mean(axis=0)
+            snap.dm['pos'] -= centroid_prev  # center on previous cluster
+
+            # Step 2: find HOP halo with most overlap with prev_iords
+            hop_hnum = find_hop_halonum(snap, prev_iords)
+            hop_halonum = hop_hnum if hop_hnum is not None else active_branches['main'].get('prev_hop_halonum')
+
+            # Get r200 from the HOP halo if found, else use bounding_r as fallback
+            r200_main = None
+            if hop_hnum is not None:
+                try:
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
+                    h_hop = hop_cat[hop_hnum - 1]  # 0-indexed
+                    r200_main = get_r200(h_hop)
+                except Exception:
+                    pass
             if r200_main is None or r200_main <= 0:
-                print(f'  Could not get r200_main, skipping snap')
-                del snap
-                continue
+                prev_bounding = active_branches['main'].get('prev_bounding_r', 20.0)
+                r200_main = prev_bounding * 2.0
+                print(f'  Using fallback r200={r200_main:.1f} kpc from prev bounding_r')
 
-            pos   = snap.dm['pos']
-            dist  = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
-            dm_within  = snap.dm[dist <= search_rad * r200_main]
-            positions  = np.array(dm_within['pos'])
-            iords_all  = np.array(dm_within['iord'])
+            # Step 3: take particles within search_rad * r200
+            pos  = np.array(snap.dm['pos'])
+            dist = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
+            within_mask = dist <= search_rad * r200_main
+            positions = pos[within_mask]
+            iords_all = all_dm_iords[within_mask]
 
             if len(iords_all) == 0:
                 print(f'  No DM particles within search radius, skipping')
-                del snap, dm_within
+                del snap
                 continue
 
-            print(f'  r200={r200_main:.1f} kpc, {len(iords_all)} DM particles in search sphere')
+            print(f'  r200={r200_main:.1f} kpc, {len(iords_all)} DM in search sphere, hop={hop_halonum}')
+
+            # Step 4: HDBSCAN on voxels to remove satellites
+            mask = _density_region_grow(
+                positions, iords_all, voxel_size,
+                prev_iords=prev_iords,
+                min_cluster_size=min_cluster_size,
+            )
+
+            if mask is None or mask.sum() == 0:
+                print(f'  No cluster found, skipping snap')
+                del snap
+                continue
+
+            cluster_iords = iords_all[mask]
+            cluster_pos   = positions[mask]
+            centroid      = cluster_pos.mean(axis=0)
+            bounding_r    = float(np.sqrt(((cluster_pos - centroid)**2).sum(axis=1)).max())
+
+            # Step 5: store results
+            active_branches['main']['prev_iords']      = cluster_iords
+            active_branches['main']['prev_centroid']    = centroid
+            active_branches['main']['prev_bounding_r']  = bounding_r
+            if hop_halonum is not None:
+                active_branches['main']['prev_hop_halonum'] = hop_halonum
 
             grp = h5f.require_group(output)
-            claimed_iords = set()
+            mg  = grp.require_group('main')
+            mg.create_dataset('iords',           data=cluster_iords.astype(np.int64))
+            mg.create_dataset('centroid',        data=centroid.astype(np.float64))
+            mg.create_dataset('bounding_radius', data=np.float64(bounding_r))
+            if hop_halonum is not None:
+                mg.create_dataset('hop_halonum', data=np.int64(hop_halonum))
 
-            # Update all existing branches with iterative voxel refinement
-            for branch_id, branch in list(active_branches.items()):
-                h_b, halonum_b = majority_vote_halo(
-                    halo_cat, branch['prev_halonum'], window, branch['prev_iords'],
-                    prefer_stars=prefer_stars)
-                halonum_b = halonum_b if h_b is not None else branch['prev_halonum']
-
-                # Clip to a tight sphere around where this branch's particles
-                # currently are — avoids allocating a grid over the full search sphere
-                clip_pos, clip_iords = clip_to_cluster(
-                    positions, iords_all, branch['prev_iords'])
-
-                mask = _density_region_grow(
-                    clip_pos, clip_iords, voxel_size,
-                    prev_iords=branch['prev_iords'],
-                    min_cluster_size=min_cluster_size,
-                )
-
-                if mask is None or mask.sum() == 0:
-                    print(f'  Branch {branch_id}: no cluster found, dropping branch')
-                    continue
-
-                cluster_iords = clip_iords[mask]
-                cluster_pos   = clip_pos[mask]
-                centroid      = cluster_pos.mean(axis=0)
-                bounding_r    = float(np.sqrt(((cluster_pos - centroid)**2).sum(axis=1)).max())
-                claimed_iords.update(cluster_iords.tolist())
-
-                branch['prev_iords']    = cluster_iords
-                branch['prev_centroid'] = centroid
-                branch['prev_halonum'] = halonum_b
-
-                bg = grp.require_group(branch_id)
-                bg.create_dataset('iords',            data=cluster_iords.astype(np.int64))
-                bg.create_dataset('halonum',          data=np.int64(halonum_b))
-                bg.create_dataset('halonum_reliable', data=np.bool_(h_b is not None))
-                bg.create_dataset('centroid',         data=centroid.astype(np.float64))
-                bg.create_dataset('bounding_radius',  data=np.float64(bounding_r))
-
-                # For main branch, also find the corresponding HOP halo
-                if branch_id == 'main':
-                    hop_hnum = find_hop_halonum(snap, cluster_iords)
-                    if hop_hnum is not None:
-                        bg.create_dataset('hop_halonum', data=np.int64(hop_hnum))
-
-                r200_b_str = f'{get_r200(h_b):.2f}' if h_b is not None else 'n/a'
-                print(f'  Branch {branch_id}: {len(cluster_iords)} particles '
-                      f'(halo {halonum_b}, r200={r200_b_str} kpc, '
-                      f'bounding_r={bounding_r:.2f} kpc)')
-
-            # Discover new satellite branches from unclaimed clusters
-            if not no_satellites:
-                all_clusters = voxel_all_clusters(
-                    positions, iords_all, voxel_size, degree=sat_degree)
-
-                n_sat = sum(1 for k in active_branches if k != 'main')
-                for lbl, sat_iords in all_clusters.items():
-                    if len(sat_iords) < min_sat_p:
-                        continue
-                    # skip if mostly claimed by existing branches
-                    overlap_claimed = np.isin(sat_iords, list(claimed_iords)).sum()
-                    if overlap_claimed > 0.5 * len(sat_iords):
-                        continue
-
-                    sat_id      = f'sat_{n_sat:03d}'
-                    sat_pos     = positions[np.isin(iords_all, sat_iords)]
-                    sat_centroid   = sat_pos.mean(axis=0)
-                    sat_bounding_r = float(np.sqrt(((sat_pos - sat_centroid)**2).sum(axis=1)).max())
-                    h_sat, halonum_sat = majority_vote_halo(halo_cat, 0, window, sat_iords)
-
-                    active_branches[sat_id] = {
-                        'prev_iords':   sat_iords,
-                        'prev_halonum': halonum_sat,
-                    }
-                    claimed_iords.update(sat_iords.tolist())
-                    n_sat += 1
-
-                    sg = grp.require_group(sat_id)
-                    sg.create_dataset('iords',            data=sat_iords.astype(np.int64))
-                    sg.create_dataset('halonum',          data=np.int64(halonum_sat))
-                    sg.create_dataset('halonum_reliable', data=np.bool_(h_sat is not None))
-                    sg.create_dataset('centroid',         data=sat_centroid.astype(np.float64))
-                    sg.create_dataset('bounding_radius',  data=np.float64(sat_bounding_r))
+            print(f'  Main branch: {len(cluster_iords)} particles '
+                  f'(hop={hop_halonum}, r200={r200_main:.1f} kpc, '
+                  f'bounding_r={bounding_r:.2f} kpc)')
                 print(f'  Spawned new branch {sat_id}: {len(sat_iords)} particles '
                       f'(halo {halonum_sat}, bounding_r={sat_bounding_r:.2f} kpc)')
 
