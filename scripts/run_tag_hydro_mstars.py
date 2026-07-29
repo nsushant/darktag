@@ -41,7 +41,8 @@ def main():
     parser.add_argument('--db-name', type=str, default=None,
                         help='Tangos DB filename stem (default: first _-delimited token of sim_name, e.g. Halo1459)')
     parser.add_argument('--track-cluster-file', type=str, required=True,
-                        help='track_cluster HDF5 file (required — provides AHF halonums to read stellar mass from halo star particles)')
+                        help='track_cluster HDF5 file (required — provides per-snapshot halonums '
+                             '[HOP preferred] + cluster iords to read stellar mass and select DM)')
     args = parser.parse_args()
 
     sim_name    = args.sim_name

@@ -1034,19 +1034,29 @@ def angmom_tag_multi_instance_hydro_mstars(
     DMOname = HYDROsim.path
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halonumber)
 
-    # Load track_cluster HDF5 — provides AHF halonums + cluster iords
+    # Load track_cluster HDF5 — provides per-snapshot halonums + cluster iords.
+    # The HOP-based tracker writes 'hop_halonum'; prefer it and index the HOP
+    # catalogue. A legacy file with only 'halonum' is read as an AHF number.
     import h5py
     _tc_data = {}
+    _tc_is_hop = False
     with h5py.File(track_cluster_file, 'r') as f:
         for snap in f.keys():
-            if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                _tc_data[snap] = {
-                    'halonum': int(f[snap]['main']['halonum'][()]),
-                    'iords':   f[snap]['main']['iords'][:],
-                }
+            if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                continue
+            grp = f[snap]['main']
+            if 'hop_halonum' in grp:
+                num = int(grp['hop_halonum'][()])
+                _tc_is_hop = True
+            elif 'halonum' in grp:
+                num = int(grp['halonum'][()])
+            else:
+                continue
+            _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
     _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
     cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-    print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+    print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+          f"using {'HOP' if _tc_is_hop else 'AHF'} halonums + cluster iords")
 
     if output_prefix is None:
         output_prefix = DMOname + '_hydromstars_tagged'
@@ -1086,16 +1096,26 @@ def angmom_tag_multi_instance_hydro_mstars(
             del HYDROparticles
             continue
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
         try:
-            h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+            if _tc_is_hop:
+                # HOP is 0-indexed; the tracker's hop_halonum is 1-based.
+                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+                hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)
+                h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
         except Exception as e:
-            print(f'  Could not load AHF halo {_tc_halonum_map[outputs[i]]}: {e}, skipping')
+            print(f'  Could not load halo {_tc_halonum_map[outputs[i]]}: {e}, skipping')
             del HYDROparticles
             continue
         pynbody.analysis.halo.center(h)
 
-        # Read stellar mass directly from halo star particles
+        # Read stellar mass directly from halo star particles. Note: HOP is often
+        # a DM-only finder, in which case h.st is empty and mstar reads 0 — if you
+        # see this warning every snap, the stellar mass must come from AHF instead.
+        if len(h.st) == 0:
+            print('  WARNING: halo has no star particles (HOP DM-only?) — mstar=0')
         if len(h.st) > 0:
             mstar_now = float(h.st['mass'].sum().in_units('Msol'))
         else:

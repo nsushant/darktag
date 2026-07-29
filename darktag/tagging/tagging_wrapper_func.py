@@ -639,21 +639,34 @@ def calculate_reffs_multi_instance(
     n_instances = len(instance_files)
     print(f'Found {n_instances} instance files in {tagged_dir}')
 
-    # AHF setup — track_cluster_file supersedes path_AHF_halonums when provided
+    # AHF setup — track_cluster_file supersedes path_AHF_halonums when provided.
+    # The HOP-based tracker writes a per-snapshot 'hop_halonum'; prefer that and
+    # centre with the HOP catalogue. A legacy tracker file with 'halonum' is
+    # still read as an AHF number for backward compatibility.
+    track_is_hop = False
     if track_cluster_file is not None:
         import h5py
         _tc_rows = []
         with h5py.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_rows.append({
-                        'snapshot':    snap,
-                        'AHF halonum': int(f[snap]['main']['halonum'][()]),
-                    })
+                if 'main' not in f[snap]:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    _tc_rows.append({'snapshot': snap,
+                                     'AHF halonum': int(grp['hop_halonum'][()])})
+                    track_is_hop = True
+                elif 'halonum' in grp:
+                    _tc_rows.append({'snapshot': snap,
+                                     'AHF halonum': int(grp['halonum'][()])})
         AHF_halonums = pd.DataFrame(_tc_rows)
-        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+        if track_is_hop:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+            print(f'Loaded track_cluster file: {len(AHF_halonums)} snapshots, using HOP halonums')
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+            print(f'Loaded track_cluster file: {len(AHF_halonums)} snapshots, using AHF halonums')
         AHF_centers  = None
-        print(f'Loaded track_cluster file: {len(AHF_halonums)} snapshots, using AHF halonums')
     else:
         AHF_halonums = None
         if path_AHF_halonums is None:
@@ -743,7 +756,12 @@ def calculate_reffs_multi_instance(
         t_val  = t_all[i]
         z_val  = red_all[i]
 
-        pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue if AHF_halonums is not None else pynbody.halo.hop.HOPCatalogue]
+        if AHF_halonums is not None:
+            pynbody.config["halo-class-priority"] = [
+                pynbody.halo.hop.HOPCatalogue if track_is_hop else pynbody.halo.ahf.AHFCatalogue
+            ]
+        else:
+            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
         simfn = join(pynbody_path, outputs[i])
         try:
@@ -758,7 +776,12 @@ def calculate_reffs_multi_instance(
                     halonum_snap = AHF_halonums[AHF_halonums["snapshot"] == str(outputs[i])]["AHF halonum"].values
                     if len(halonum_snap) == 0:
                         raise KeyError(f'Snapshot {outputs[i]} not found in track_cluster file')
-                    h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap[0])]
+                    if track_is_hop:
+                        # HOP is 0-indexed; the tracker's hop_halonum is 1-based.
+                        hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                        h = hop_cat[int(halonum_snap[0]) - 1]
+                    else:
+                        h = DMOparticles.halos(halo_numbers='v1')[int(halonum_snap[0])]
                 else:
                     if use_ahf:
                         h = DMOparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]
@@ -770,7 +793,9 @@ def calculate_reffs_multi_instance(
                 AHF_crossref = AHF_centers[AHF_centers['i'] == i]['AHF catalogue id'].values[0]
                 h = DMOparticles.halos()[int(AHF_crossref)]
 
-            if use_ahf or AHF_halonums is not None:
+            if track_is_hop:
+                halo_cat = hop_cat
+            elif use_ahf or AHF_halonums is not None:
                 halo_cat = DMOparticles.halos(halo_numbers='v1')
             else:
                 halo_cat = hop_cat

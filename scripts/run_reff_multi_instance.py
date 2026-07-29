@@ -40,7 +40,8 @@ def main():
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--track-cluster-file', type=str, default=None,
-                        help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums')
+                        help='track_cluster HDF5 file; uses its per-snapshot halonums '
+                             '(HOP hop_halonum preferred, AHF halonum for legacy files)')
     parser.add_argument('--max-instances', type=int, default=None,
                         help='Only process the first N instance files (useful for testing)')
     args = parser.parse_args()

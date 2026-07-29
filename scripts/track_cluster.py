@@ -34,7 +34,6 @@ sys.path.insert(0, os.path.expanduser('~'))
 sys.path.insert(0, os.path.abspath(pjoin(os.path.dirname(os.path.abspath(__file__)), '..')))
 
 from darktag.config import config
-from darktag.tagging.tagging_wrapper_func import _density_region_grow
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -345,7 +344,7 @@ def main():
 
     print(f'Found {len(outputs)} snapshots in {pynbody_path}')
     print(f'Output: {output_path}')
-    print(f'Voxel size: {voxel_size} kpc, min_cluster_size: {min_cluster_size}')
+    print(f'Tracing main branch via HOP catalogue (halo {halonumber} at z=0)')
 
     # ── Resume ────────────────────────────────────────────────────────────────
     active_branches = {}
@@ -428,46 +427,30 @@ def main():
                     del snap
                     break  # abort — no point trying earlier snaps without a seed
 
-                pynbody.analysis.halo.center(h)
-                r200 = get_r200(h)
-                if r200 is None or r200 <= 0:
-                    print(f'  Could not get r200, aborting')
+                # Trace the DM via the HOP catalogue: the seed halo's own DM
+                # membership defines the galaxy at z=0 — no search sphere or
+                # voxel clustering needed.
+                main_iords = np.asarray(h.dm['iord'])
+                if len(main_iords) == 0:
+                    print(f'  Seed halo {halonumber} has no DM particles, aborting')
                     del snap
                     break
 
-                pos  = snap.dm['pos']
-                dist = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
-                dm_within = snap.dm[dist <= search_rad * r200]
-                positions = np.array(dm_within['pos'])
-                iords_all = np.array(dm_within['iord'])
+                main_pos   = np.asarray(h.dm['pos'])
+                centroid   = main_pos.mean(axis=0)
+                bounding_r = float(np.sqrt(((main_pos - centroid) ** 2).sum(axis=1)).max())
 
-                # For seeding, clip to 1×r200 — the halo is centred at origin
-                # and the wide search sphere is only needed for satellites / tracking
-                seed_dist = np.sqrt((positions ** 2).sum(axis=1))
-                seed_mask = seed_dist <= r200
-                seed_pos   = positions[seed_mask]
-                seed_iords = iords_all[seed_mask]
-
-                mask = _density_region_grow(
-                    seed_pos, seed_iords, voxel_size,
-                    prev_iords=None, min_cluster_size=min_cluster_size,
-                )
-                if mask is None or mask.sum() == 0:
-                    print(f'  Seed clustering failed, skipping')
-                    continue
-
-                main_iords    = seed_iords[mask]
-                main_pos      = seed_pos[mask]
-                centroid      = main_pos.mean(axis=0)
-                bounding_r    = float(np.sqrt(((main_pos - centroid)**2).sum(axis=1)).max())
-
-                # Find corresponding HOP halo for tangos merger tree queries
+                # Corresponding HOP halo number (for tangos merger-tree queries).
+                # For a HOP seed this is halonumber itself; for an AHF seed it
+                # bridges to the overlapping HOP halo used for subsequent tracing.
                 hop_hnum = find_hop_halonum(snap, main_iords)
 
                 active_branches['main'] = {
-                    'prev_iords':    main_iords,
-                    'prev_halonum':  halonumber,
-                    'prev_centroid': centroid,
+                    'prev_iords':       main_iords,
+                    'prev_halonum':     halonumber,
+                    'prev_centroid':    centroid,
+                    'prev_bounding_r':  bounding_r,
+                    'prev_hop_halonum': hop_hnum,
                 }
 
                 grp = h5f.require_group(output)
@@ -481,103 +464,71 @@ def main():
                 mg.create_dataset('bounding_radius',  data=np.float64(bounding_r))
                 h5f.flush()
                 print(f'  Seeded main branch: {len(main_iords)} particles '
-                      f'(halo {halonumber}, hop={hop_hnum}, r200={r200:.2f} kpc, '
+                      f'(halo {halonumber}, hop={hop_hnum}, '
                       f'bounding_r={bounding_r:.2f} kpc)')
-                del snap, dm_within
+                del snap
                 continue
 
             # ── SUBSEQUENT SNAPS ──────────────────────────────────────────────
 
             prev_iords = active_branches['main']['prev_iords']
 
-            # Step 1: find prev_iords in this snapshot, center on them
-            all_dm_iords = np.array(snap.dm['iord'])
-            in_prev = np.isin(all_dm_iords, prev_iords)
-            if not in_prev.any():
+            # Step 1: confirm the previous galaxy's particles are present here
+            all_dm_iords = np.asarray(snap.dm['iord'])
+            if not np.isin(all_dm_iords, prev_iords).any():
                 print(f'  No previous particles found in snapshot, skipping')
                 del snap
                 continue
 
-            prev_pos = np.array(snap.dm['pos'])[in_prev]
-            centroid_prev = prev_pos.mean(axis=0)
-            snap.dm['pos'] -= centroid_prev  # center on previous cluster
-
-            # Step 2: find HOP halo with most overlap with prev_iords.
-            # Build the HOP catalogue ONCE and reuse it for both the halonum
-            # search and the r200 lookup below. Constructing it runs the HOP
-            # group finder and is expensive; it was previously built twice per
-            # snapshot (once inside find_hop_halonum, once again for r200).
+            # Step 2: match the HOP halo with the most iord overlap with
+            # prev_iords and take its DM membership directly — that halo IS the
+            # traced galaxy at this snapshot. No search sphere or voxel
+            # clustering, so there is no bounding_r → r200 → sphere feedback.
             try:
                 hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
             except Exception as e:
-                print(f'  Could not load HOP catalogue: {e}')
-                hop_cat = None
+                print(f'  Could not load HOP catalogue: {e}, skipping')
+                del snap
+                continue
 
             hop_hnum = find_hop_halonum(snap, prev_iords, hop_cat=hop_cat)
-            hop_halonum = hop_hnum if hop_hnum is not None else active_branches['main'].get('prev_hop_halonum')
-
-            # Get r200 from the HOP halo if found, else use bounding_r as fallback
-            r200_main = None
-            if hop_hnum is not None and hop_cat is not None:
-                try:
-                    h_hop = hop_cat[hop_hnum - 1]  # 0-indexed
-                    r200_main = get_r200(h_hop)
-                except Exception:
-                    pass
-            if r200_main is None or r200_main <= 0:
-                prev_bounding = active_branches['main'].get('prev_bounding_r', 20.0)
-                r200_main = prev_bounding * 2.0
-                print(f'  Using fallback r200={r200_main:.1f} kpc from prev bounding_r')
-
-            # Step 3: take particles within search_rad * r200
-            pos  = np.array(snap.dm['pos'])
-            dist = np.sqrt(pos[:, 0]**2 + pos[:, 1]**2 + pos[:, 2]**2)
-            within_mask = dist <= search_rad * r200_main
-            positions = pos[within_mask]
-            iords_all = all_dm_iords[within_mask]
-
-            if len(iords_all) == 0:
-                print(f'  No DM particles within search radius, skipping')
+            if hop_hnum is None:
+                print(f'  No HOP halo matched previous particles, skipping snap')
                 del snap
                 continue
 
-            print(f'  r200={r200_main:.1f} kpc, {len(iords_all)} DM in search sphere, hop={hop_halonum}')
-
-            # Step 4: HDBSCAN on voxels to remove satellites
-            mask = _density_region_grow(
-                positions, iords_all, voxel_size,
-                prev_iords=prev_iords,
-                min_cluster_size=min_cluster_size,
-            )
-
-            if mask is None or mask.sum() == 0:
-                print(f'  No cluster found, skipping snap')
+            try:
+                h_hop = hop_cat[hop_hnum - 1]  # 0-indexed
+                cluster_iords = np.asarray(h_hop.dm['iord'])
+                cluster_pos   = np.asarray(h_hop.dm['pos'])
+            except Exception as e:
+                print(f'  Could not read HOP halo {hop_hnum}: {e}, skipping')
                 del snap
                 continue
 
-            cluster_iords = iords_all[mask]
-            cluster_pos   = positions[mask]
-            centroid      = cluster_pos.mean(axis=0)
-            bounding_r    = float(np.sqrt(((cluster_pos - centroid)**2).sum(axis=1)).max())
+            if len(cluster_iords) == 0:
+                print(f'  HOP halo {hop_hnum} has no DM particles, skipping')
+                del snap
+                continue
 
-            # Step 5: store results
-            active_branches['main']['prev_iords']      = cluster_iords
+            centroid   = cluster_pos.mean(axis=0)
+            bounding_r = float(np.sqrt(((cluster_pos - centroid) ** 2).sum(axis=1)).max())
+
+            # Step 3: store results
+            active_branches['main']['prev_iords']       = cluster_iords
             active_branches['main']['prev_centroid']    = centroid
             active_branches['main']['prev_bounding_r']  = bounding_r
-            if hop_halonum is not None:
-                active_branches['main']['prev_hop_halonum'] = hop_halonum
+            active_branches['main']['prev_hop_halonum'] = hop_hnum
 
             grp = h5f.require_group(output)
             mg  = grp.require_group('main')
             mg.create_dataset('iords',           data=cluster_iords.astype(np.int64))
             mg.create_dataset('centroid',        data=centroid.astype(np.float64))
             mg.create_dataset('bounding_radius', data=np.float64(bounding_r))
-            if hop_halonum is not None:
-                mg.create_dataset('hop_halonum', data=np.int64(hop_halonum))
+            mg.create_dataset('hop_halonum',     data=np.int64(hop_hnum))
 
             print(f'  Main branch: {len(cluster_iords)} particles '
-                  f'(hop={hop_halonum}, r200={r200_main:.1f} kpc, '
-                  f'bounding_r={bounding_r:.2f} kpc)')
+                  f'(hop={hop_hnum}, bounding_r={bounding_r:.2f} kpc)')
 
             h5f.flush()
             del snap
