@@ -224,7 +224,7 @@ def load_halo_catalogue(snap, use_ahf):
         return snap.halos(halo_numbers='v1')
     else:
         pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
-        return pynbody.halo.hop.HOPCatalogue(snap)
+        return snap.halos()
 
 
 def find_hop_halonum(snap, cluster_iords, hop_cat=None, max_halos=50):
@@ -235,10 +235,12 @@ def find_hop_halonum(snap, cluster_iords, hop_cat=None, max_halos=50):
     If hop_cat is provided it is reused (the caller is responsible for building
     it once per snapshot); otherwise a HOP catalogue is constructed here.
     """
+    import pynbody
     import pynbody.halo.hop
     if hop_cat is None:
         try:
-            hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
+            pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+            hop_cat = snap.halos()
         except Exception as e:
             print(f'  Could not load HOP catalogue: {e}')
             return None
@@ -485,7 +487,8 @@ def main():
             # traced galaxy at this snapshot. No search sphere or voxel
             # clustering, so there is no bounding_r → r200 → sphere feedback.
             try:
-                hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
+                pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+                hop_cat = snap.halos()
             except Exception as e:
                 print(f'  Could not load HOP catalogue: {e}, skipping')
                 del snap
