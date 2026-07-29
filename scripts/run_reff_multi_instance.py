@@ -35,10 +35,8 @@ def main():
                         help='Disable density region growing when calculating reffs')
     parser.add_argument('--voxel-size', type=float, default=0.08,
                         help='Voxel edge length in kpc for region growing (default: 0.08)')
-    parser.add_argument('--n-seeds', type=int, default=3,
-                        help='Number of density peaks to try for region growing (default: 3)')
-    parser.add_argument('--min-shells', type=int, default=3,
-                        help='Minimum shells before allowing a density cut (default: 3)')
+    parser.add_argument('--min-cluster-size', type=int, default=20,
+                        help='HDBSCAN min_cluster_size in voxels (default: 20)')
     parser.add_argument('--ahf', action='store_true', default=False,
                         help='Use AHF halo catalogue instead of HOP')
     parser.add_argument('--track-cluster-file', type=str, default=None,
@@ -78,8 +76,7 @@ def main():
         track_cluster_file=args.track_cluster_file,
         max_instances=args.max_instances,
         voxel_size_kpc=args.voxel_size,
-        n_seeds=args.n_seeds,
-        min_shells=args.min_shells,
+        min_cluster_size=args.min_cluster_size,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'

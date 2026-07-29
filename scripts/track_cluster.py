@@ -274,10 +274,8 @@ def main():
                         help='Halo index at z=0 to seed main branch (default: 1)')
     parser.add_argument('--voxel-size', type=float, default=0.2,
                         help='Fixed voxel edge length in kpc (default: 0.2)')
-    parser.add_argument('--n-seeds', type=int, default=3,
-                        help='Number of density peaks to try for region growing (default: 3)')
-    parser.add_argument('--min-shells', type=int, default=3,
-                        help='Minimum shells before allowing a density cut (default: 3)')
+    parser.add_argument('--min-cluster-size', type=int, default=20,
+                        help='HDBSCAN min_cluster_size in voxels (default: 20)')
     parser.add_argument('--search-radius', type=float, default=3.0,
                         help='Load DM within this × r200_main of main centroid (default: 3.0)')
     parser.add_argument('--min-satellite-particles', type=int, default=100,
@@ -308,8 +306,7 @@ def main():
     sim_name           = args.sim_name
     halonumber         = args.halonumber
     voxel_size         = args.voxel_size
-    n_seeds            = args.n_seeds
-    min_shells         = args.min_shells
+    min_cluster_size   = args.min_cluster_size
     search_rad         = args.search_radius
     min_sat_p       = args.min_satellite_particles
     window          = args.halo_search_window
@@ -339,7 +336,7 @@ def main():
 
     print(f'Found {len(outputs)} snapshots in {pynbody_path}')
     print(f'Output: {output_path}')
-    print(f'Voxel size: {voxel_size} kpc, n_seeds: {n_seeds}, min_shells: {min_shells}')
+    print(f'Voxel size: {voxel_size} kpc, min_cluster_size: {min_cluster_size}')
 
     # ── Resume ────────────────────────────────────────────────────────────────
     active_branches = {}
@@ -438,7 +435,7 @@ def main():
 
                 mask = _density_region_grow(
                     seed_pos, seed_iords, voxel_size,
-                    prev_iords=None, n_seeds=n_seeds, min_shells=min_shells,
+                    prev_iords=None, min_cluster_size=min_cluster_size,
                 )
                 if mask is None or mask.sum() == 0:
                     print(f'  Seed clustering failed, skipping')
@@ -535,7 +532,7 @@ def main():
                 mask = _density_region_grow(
                     clip_pos, clip_iords, voxel_size,
                     prev_iords=branch['prev_iords'],
-                    n_seeds=n_seeds, min_shells=min_shells,
+                    min_cluster_size=min_cluster_size,
                 )
 
                 if mask is None or mask.sum() == 0:

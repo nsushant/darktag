@@ -115,151 +115,91 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
 
 
 def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
-                         n_seeds=3, min_shells=3):
+                         min_cluster_size=20, **kwargs):
     """
-    Region-growing clustering using cumulative density profile minima.
+    Voxel-based HDBSCAN clustering.
 
-    Voxelises particle positions, then grows regions from the n_seeds
-    densest voxels (each picked after excluding previous regions).
-    For each seed, grows outward shell by shell via binary_dilation,
-    tracking cumulative density (total particles / total occupied voxels).
-    Growth is cut at the first cumulative density minimum after min_shells.
-
-    The winner is selected by overlap with prev_iords (or largest region
-    if prev_iords is not available).
+    Voxelises particle positions, runs HDBSCAN on occupied voxel centres,
+    then selects the cluster with most overlap with prev_iords (or the
+    largest cluster if prev_iords is not available).
 
     Parameters
     ----------
-    positions  : (N, 3) float array – positions in kpc
-    iords      : (N,) int array
-    voxel_size : float – voxel edge in kpc
-    prev_iords : array-like or None – iords from previous snapshot
-    n_seeds    : int – number of density peaks to try (default 3)
-    min_shells : int – minimum shells before allowing a cut (default 3)
+    positions        : (N, 3) float array – positions in kpc
+    iords            : (N,) int array
+    voxel_size       : float – voxel edge in kpc
+    prev_iords       : array-like or None – iords from previous snapshot
+    min_cluster_size : int – HDBSCAN min_cluster_size in voxels (default 20)
 
     Returns
     -------
     mask : (N,) bool array, or None if no particles found
     """
-    from scipy.ndimage import binary_dilation
+    import hdbscan
 
     if len(positions) == 0:
         return None
 
+    # Voxelise
     vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
     vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
     vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
 
-    ox, oy, oz = int(vx.min()), int(vy.min()), int(vz.min())
-    gx = (vx - ox).astype(np.int32)
-    gy = (vy - oy).astype(np.int32)
-    gz = (vz - oz).astype(np.int32)
-    del vx, vy, vz
+    # Unique voxel indices and mapping from particles to voxels
+    voxel_keys = np.column_stack([vx, vy, vz])
+    unique_voxels, inverse = np.unique(voxel_keys, axis=0, return_inverse=True)
+    del vx, vy, vz, voxel_keys
 
-    nx, ny, nz = int(gx.max()) + 1, int(gy.max()) + 1, int(gz.max()) + 1
+    n_voxels = len(unique_voxels)
+    print(f'    hdbscan: {n_voxels} occupied voxels from {len(positions)} particles')
 
-    # Count grid: number of particles per voxel
-    count_grid = np.zeros((nx, ny, nz), dtype=np.int32)
-    np.add.at(count_grid, (gx, gy, gz), 1)
-    occupied = count_grid > 0
+    if n_voxels < min_cluster_size:
+        # Too few voxels to cluster — return all particles
+        return np.ones(len(positions), dtype=bool)
 
-    structure3 = np.ones((3, 3, 3), dtype=bool)
-    max_steps = max(nx, ny, nz)
+    # Run HDBSCAN on voxel centres (in kpc)
+    voxel_centres = unique_voxels.astype(np.float64) * voxel_size
+    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=1)
+    labels = clusterer.fit_predict(voxel_centres)
 
-    # Track which voxels have been claimed by previous seed regions
-    excluded = np.zeros((nx, ny, nz), dtype=bool)
+    unique_labels = set(labels)
+    unique_labels.discard(-1)  # noise
 
-    candidate_regions = []
+    if len(unique_labels) == 0:
+        # No clusters found — return all particles as one cluster
+        print('    hdbscan: no clusters found, returning all particles')
+        return np.ones(len(positions), dtype=bool)
 
-    for seed_idx in range(n_seeds):
-        # Find densest voxel not in any previous region
-        search_grid = count_grid.copy()
-        search_grid[excluded] = 0
-        if search_grid.max() == 0:
-            break
-        seed = np.unravel_index(search_grid.argmax(), search_grid.shape)
+    # Map voxel labels back to particles
+    particle_labels = labels[inverse]
 
-        # Pass 1: grow all shells, record cumulative density per step
-        region = np.zeros((nx, ny, nz), dtype=bool)
-        region[seed] = True
-        total_p = int(count_grid[seed])
-        total_v = 1
-        cum_densities = [float(total_p) / total_v]
-        n_shells = 0
-
-        for step in range(max_steps):
-            expanded = binary_dilation(region, structure=structure3, iterations=1)
-            new_shell = expanded & ~region & occupied
-            if not new_shell.any():
-                break
-            shell_p = int(count_grid[new_shell].sum())
-            shell_v = int(new_shell.sum())
-            total_p += shell_p
-            total_v += shell_v
-            cum_densities.append(float(total_p) / total_v)
-            region |= new_shell
-            n_shells += 1
-
-        # Find cut: first minimum after min_shells
-        # A minimum is where cum_density[s] < cum_density[s+1]
-        cut_shell = n_shells  # default: keep everything
-        for s in range(min_shells, len(cum_densities) - 1):
-            if cum_densities[s] < cum_densities[s + 1]:
-                cut_shell = s
-                break
-
-        # Pass 2: re-grow from seed, stop at cut_shell
-        region = np.zeros((nx, ny, nz), dtype=bool)
-        region[seed] = True
-        for step in range(cut_shell):
-            expanded = binary_dilation(region, structure=structure3, iterations=1)
-            new_shell = expanded & ~region & occupied
-            if not new_shell.any():
-                break
-            region |= new_shell
-
-        region_particle_count = int(count_grid[region].sum())
-
-        # Exclude this region's voxels from future seeds
-        excluded |= region
-
-        # Map region to particle mask
-        region_mask = region[gx, gy, gz]
-        region_iords = iords[region_mask]
-
-        candidate_regions.append({
-            'mask': region_mask,
-            'iords': region_iords,
-            'n_particles': region_particle_count,
-            'cut_shell': cut_shell,
-            'n_shells_total': n_shells,
-            'seed_idx': seed_idx,
-        })
-
-    if not candidate_regions:
-        return None
-
-    # Select winner
+    # Select winning cluster
     if prev_iords is not None and len(prev_iords) > 0:
         prev_set = set(np.asarray(prev_iords).ravel())
-        best_idx = 0
+        best_label = -1
         best_overlap = -1
-        for i, cand in enumerate(candidate_regions):
-            overlap = sum(1 for iord in cand['iords'] if iord in prev_set)
+        for lbl in unique_labels:
+            cluster_iords = iords[particle_labels == lbl]
+            overlap = np.isin(cluster_iords, list(prev_set)).sum()
             if overlap > best_overlap:
                 best_overlap = overlap
-                best_idx = i
-        winner = candidate_regions[best_idx]
-        print(f'    region grow: seed {winner["seed_idx"]}, '
-              f'{winner["n_particles"]} particles, cut at shell {winner["cut_shell"]}'
-              f'/{winner["n_shells_total"]}, overlap {best_overlap}')
+                best_label = lbl
+        n_particles = int((particle_labels == best_label).sum())
+        print(f'    hdbscan: cluster {best_label}, {n_particles} particles, '
+              f'overlap {best_overlap} ({len(unique_labels)} clusters found)')
     else:
-        winner = max(candidate_regions, key=lambda c: c['n_particles'])
-        print(f'    region grow: seed {winner["seed_idx"]}, '
-              f'{winner["n_particles"]} particles, cut at shell {winner["cut_shell"]}'
-              f'/{winner["n_shells_total"]} (largest)')
+        # Pick largest cluster by particle count
+        best_label = -1
+        best_count = -1
+        for lbl in unique_labels:
+            count = int((particle_labels == lbl).sum())
+            if count > best_count:
+                best_count = count
+                best_label = lbl
+        print(f'    hdbscan: cluster {best_label}, {best_count} particles '
+              f'(largest of {len(unique_labels)})')
 
-    return winner['mask']
+    return particle_labels == best_label
 
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):
@@ -682,8 +622,7 @@ def calculate_reffs_multi_instance(
     voxel_size_kpc=0.08,
     track_cluster_file=None,
     max_instances=None,
-    n_seeds=3,
-    min_shells=3,
+    min_cluster_size=20,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -702,8 +641,7 @@ def calculate_reffs_multi_instance(
         output_dir        - directory to write output reff CSVs (default: tagged_dir + '_reffs')
         save_to_file      - whether to write CSVs incrementally (default True)
         voxel_size_kpc    - voxel edge length in kpc (default 0.08)
-        n_seeds           - number of density peaks to try for region growing (default 3)
-        min_shells        - minimum shells before allowing a density cut (default 3)
+        min_cluster_size  - HDBSCAN min_cluster_size in voxels (default 20)
 
     Returns:
         list of reff DataFrames, one per instance
@@ -919,7 +857,7 @@ def calculate_reffs_multi_instance(
                 mask_k  = _density_region_grow(
                     pos_k, iords_k, float(voxel_size_kpc),
                     prev_iords=PrevVoxelIords[k] if len(PrevVoxelIords[k]) > 0 else None,
-                    n_seeds=n_seeds, min_shells=min_shells,
+                    min_cluster_size=min_cluster_size,
                 )
                 if mask_k is None or mask_k.sum() == 0:
                     continue
@@ -1005,8 +943,7 @@ def calculate_reffs_hydro_stars(
     use_ahf=False,
     voxel_size_kpc=0.08,
     track_cluster_file=None,
-    n_seeds=3,
-    min_shells=3,
+    min_cluster_size=20,
 ):
     '''
     Calculate half-light and half-mass radii directly from HYDRO stellar particles.
@@ -1022,11 +959,10 @@ def calculate_reffs_hydro_stars(
         halo_number    - halo index (default 0)
         output_fname   - output CSV path (default: <sim_name>_hydro_reffs.csv)
         save_to_file   - write CSV incrementally (default True)
-        use_clustering - use region growing clustering to exclude satellites (default True)
-        use_ahf        - use AHF catalogue instead of HOP (default False)
-        voxel_size_kpc - voxel edge length in kpc (default 0.08)
-        n_seeds        - number of density peaks to try for region growing (default 3)
-        min_shells     - minimum shells before allowing a density cut (default 3)
+        use_clustering   - use HDBSCAN voxel clustering to exclude satellites (default True)
+        use_ahf          - use AHF catalogue instead of HOP (default False)
+        voxel_size_kpc   - voxel edge length in kpc (default 0.08)
+        min_cluster_size - HDBSCAN min_cluster_size in voxels (default 20)
 
     Returns:
         DataFrame with columns: t, z, reff, halflight, kravtsov
@@ -1168,7 +1104,7 @@ def calculate_reffs_hydro_stars(
             mask_st  = _density_region_grow(
                 pos_st, iords_st, float(voxel_size_kpc),
                 prev_iords=PrevVoxelIords if len(PrevVoxelIords) > 0 else None,
-                n_seeds=n_seeds, min_shells=min_shells,
+                min_cluster_size=min_cluster_size,
             )
             if mask_st is None or mask_st.sum() == 0:
                 print('  Region growing returned empty cluster, skipping')
