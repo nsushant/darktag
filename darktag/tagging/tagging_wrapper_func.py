@@ -115,13 +115,24 @@ def _voxel_pick_cluster(positions, iords, voxel_size, prev_iords=None,
 
 
 def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
-                         min_cluster_size=20, **kwargs):
+                         min_cluster_size=20, max_degree=20, size_jump=2.0,
+                         **kwargs):
     """
-    Voxel-based HDBSCAN clustering.
+    Voxel-based cluster isolation via connected-component labelling.
 
-    Voxelises particle positions, runs HDBSCAN on occupied voxel centres,
-    then selects the cluster with most overlap with prev_iords (or the
-    largest cluster if prev_iords is not available).
+    Voxelises particle positions onto a fixed grid and isolates the main
+    cluster with scipy.ndimage.label (see _voxel_pick_cluster), growing an
+    FoF-style linking length by iterative dilation until the main cluster
+    stabilises or a size jump signals it has absorbed a satellite.
+
+    This replaces the previous HDBSCAN implementation. Because positions are
+    already discretised onto a voxel grid, connected-component labelling is
+    the natural clustering operation and is dramatically faster than running
+    density-based HDBSCAN on the voxel centres; iterative dilation supplies
+    the linking length that keeps a single galaxy from fragmenting into its
+    diffuse outskirts.
+
+    The signature is kept backward-compatible with all existing callers.
 
     Parameters
     ----------
@@ -129,77 +140,40 @@ def _density_region_grow(positions, iords, voxel_size, prev_iords=None,
     iords            : (N,) int array
     voxel_size       : float – voxel edge in kpc
     prev_iords       : array-like or None – iords from previous snapshot
-    min_cluster_size : int – HDBSCAN min_cluster_size in voxels (default 20)
+    min_cluster_size : int – minimum particle count for a valid cluster; below
+                       this the input is treated as a single cluster (matches
+                       the previous fallback behaviour)
+    max_degree       : int – maximum dilation degree (linking length in voxels)
+    size_jump        : float – size-ratio threshold signalling satellite absorption
 
     Returns
     -------
     mask : (N,) bool array, or None if no particles found
     """
-    import hdbscan
-
-    if len(positions) == 0:
+    positions = np.asarray(positions)
+    iords = np.asarray(iords)
+    n = len(positions)
+    if n == 0:
         return None
 
-    # Voxelise
-    vx = np.floor(positions[:, 0] / voxel_size).astype(np.int64)
-    vy = np.floor(positions[:, 1] / voxel_size).astype(np.int64)
-    vz = np.floor(positions[:, 2] / voxel_size).astype(np.int64)
+    mask = _voxel_pick_cluster(
+        positions, iords, voxel_size,
+        prev_iords=prev_iords,
+        max_degree=max_degree,
+        size_jump=size_jump,
+    )
 
-    # Unique voxel indices and mapping from particles to voxels
-    voxel_keys = np.column_stack([vx, vy, vz])
-    unique_voxels, inverse = np.unique(voxel_keys, axis=0, return_inverse=True)
-    del vx, vy, vz, voxel_keys
+    # No cluster resolved, or the resolved cluster is below the minimum size —
+    # fall back to treating all particles as a single cluster. This preserves
+    # the edge-case behaviour of the previous HDBSCAN implementation, which
+    # returned all particles when no cluster met min_cluster_size.
+    if mask is None or int(mask.sum()) < min_cluster_size:
+        print(f'    voxel-label: no cluster >= min_cluster_size '
+              f'({min_cluster_size}), returning all {n} particles')
+        return np.ones(n, dtype=bool)
 
-    n_voxels = len(unique_voxels)
-    print(f'    hdbscan: {n_voxels} occupied voxels from {len(positions)} particles')
-
-    if n_voxels < min_cluster_size:
-        # Too few voxels to cluster — return all particles
-        return np.ones(len(positions), dtype=bool)
-
-    # Run HDBSCAN on voxel centres (in kpc)
-    voxel_centres = unique_voxels.astype(np.float64) * voxel_size
-    clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, min_samples=1)
-    labels = clusterer.fit_predict(voxel_centres)
-
-    unique_labels = set(labels)
-    unique_labels.discard(-1)  # noise
-
-    if len(unique_labels) == 0:
-        # No clusters found — return all particles as one cluster
-        print('    hdbscan: no clusters found, returning all particles')
-        return np.ones(len(positions), dtype=bool)
-
-    # Map voxel labels back to particles
-    particle_labels = labels[inverse]
-
-    # Select winning cluster
-    if prev_iords is not None and len(prev_iords) > 0:
-        prev_set = set(np.asarray(prev_iords).ravel())
-        best_label = -1
-        best_overlap = -1
-        for lbl in unique_labels:
-            cluster_iords = iords[particle_labels == lbl]
-            overlap = np.isin(cluster_iords, list(prev_set)).sum()
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_label = lbl
-        n_particles = int((particle_labels == best_label).sum())
-        print(f'    hdbscan: cluster {best_label}, {n_particles} particles, '
-              f'overlap {best_overlap} ({len(unique_labels)} clusters found)')
-    else:
-        # Pick largest cluster by particle count
-        best_label = -1
-        best_count = -1
-        for lbl in unique_labels:
-            count = int((particle_labels == lbl).sum())
-            if count > best_count:
-                best_count = count
-                best_label = lbl
-        print(f'    hdbscan: cluster {best_label}, {best_count} particles '
-              f'(largest of {len(unique_labels)})')
-
-    return particle_labels == best_label
+    print(f'    voxel-label: main cluster {int(mask.sum())}/{n} particles')
+    return mask
 
 
 def get_child_iords(halo,halo_catalog,DMO_state='fiducial'):

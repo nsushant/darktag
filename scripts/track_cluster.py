@@ -228,27 +228,33 @@ def load_halo_catalogue(snap, use_ahf):
         return pynbody.halo.hop.HOPCatalogue(snap)
 
 
-def find_hop_halonum(snap, cluster_iords, max_halos=50):
+def find_hop_halonum(snap, cluster_iords, hop_cat=None, max_halos=50):
     """
     Find the HOP halo with the most iord overlap with cluster_iords.
     Returns the 1-based HOP halo number (for tangos compatibility), or None.
+
+    If hop_cat is provided it is reused (the caller is responsible for building
+    it once per snapshot); otherwise a HOP catalogue is constructed here.
     """
     import pynbody.halo.hop
-    try:
-        hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
-    except Exception as e:
-        print(f'  Could not load HOP catalogue: {e}')
-        return None
+    if hop_cat is None:
+        try:
+            hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
+        except Exception as e:
+            print(f'  Could not load HOP catalogue: {e}')
+            return None
 
-    cluster_set = set(np.asarray(cluster_iords).ravel())
-    n_cluster = len(cluster_set)
+    # Build the comparison array ONCE (sorted unique) instead of rebuilding a
+    # Python list on every loop iteration.
+    cluster_arr = np.unique(np.asarray(cluster_iords).ravel())
+    n_cluster = len(cluster_arr)
     best_idx   = None
     best_score = 0
 
     for idx in range(min(max_halos, len(hop_cat))):
         try:
             h = hop_cat[idx]
-            overlap = np.isin(np.asarray(h.dm['iord']), list(cluster_set)).sum()
+            overlap = np.isin(np.asarray(h.dm['iord']), cluster_arr).sum()
             if overlap > best_score:
                 best_score = overlap
                 best_idx   = idx
@@ -394,17 +400,23 @@ def main():
                 print(f'  Failed to load snapshot: {e}, skipping')
                 continue
 
-            try:
-                halo_cat = load_halo_catalogue(snap, use_ahf)
-            except Exception as e:
-                print(f'  Failed to load halo catalogue: {e}, skipping')
-                continue
-
             # ── SEED at z=0 (first snapshot only) ────────────────────────────
             if not active_branches:
                 if output != outputs_reversed[0]:
                     # Seeding failed at z=0 — don't retry on earlier snaps
                     print(f'  Seed not established at z=0, skipping')
+                    del snap
+                    continue
+
+                # The halo catalogue is only needed to look up the seed halo.
+                # Build it here inside the seed branch rather than once per
+                # snapshot — subsequent snaps never use it (they build the HOP
+                # catalogue later for the halonum/r200 lookup), so constructing
+                # it every loop was wasted work.
+                try:
+                    halo_cat = load_halo_catalogue(snap, use_ahf)
+                except Exception as e:
+                    print(f'  Failed to load halo catalogue: {e}, skipping')
                     del snap
                     continue
 
@@ -490,15 +502,24 @@ def main():
             centroid_prev = prev_pos.mean(axis=0)
             snap.dm['pos'] -= centroid_prev  # center on previous cluster
 
-            # Step 2: find HOP halo with most overlap with prev_iords
-            hop_hnum = find_hop_halonum(snap, prev_iords)
+            # Step 2: find HOP halo with most overlap with prev_iords.
+            # Build the HOP catalogue ONCE and reuse it for both the halonum
+            # search and the r200 lookup below. Constructing it runs the HOP
+            # group finder and is expensive; it was previously built twice per
+            # snapshot (once inside find_hop_halonum, once again for r200).
+            try:
+                hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
+            except Exception as e:
+                print(f'  Could not load HOP catalogue: {e}')
+                hop_cat = None
+
+            hop_hnum = find_hop_halonum(snap, prev_iords, hop_cat=hop_cat)
             hop_halonum = hop_hnum if hop_hnum is not None else active_branches['main'].get('prev_hop_halonum')
 
             # Get r200 from the HOP halo if found, else use bounding_r as fallback
             r200_main = None
-            if hop_hnum is not None:
+            if hop_hnum is not None and hop_cat is not None:
                 try:
-                    hop_cat = pynbody.halo.hop.HOPCatalogue(snap)
                     h_hop = hop_cat[hop_hnum - 1]  # 0-indexed
                     r200_main = get_r200(h_hop)
                 except Exception:
