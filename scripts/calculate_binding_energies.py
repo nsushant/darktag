@@ -1,11 +1,17 @@
 """
 Calculate and cache binding energies for DM particles within r200c of the main halo.
 
-Reads halonums per snapshot from a track_cluster HDF5 file, loads the AHF halo,
-computes PE via pynbody.gravity.direct + KE from snapshot, and writes results to
-an output HDF5 file.
+Reads halonums per snapshot from a track file, loads the halo, computes PE via
+pynbody.gravity.direct (DM-only potential) + KE from the snapshot, and writes
+results to an output HDF5 file.
 
-Supports both DMO and HYDRO simulations. Resume-safe: skips snapshots already written.
+Track file: prefers the per-snapshot 'hop_halonum' written by
+scripts/ahf_to_hop_conversion.py (indexes the HOP catalogue); falls back to a
+legacy AHF 'halonum'. The catalogue is chosen automatically to match.
+
+Works for both DMO and HYDRO simulations (HYDRO computes the DM binding energy
+using the DM-only potential, same as DMO). Resume-safe: skips snapshots already
+written.
 
 Output HDF5 structure:
     /output_0089/iords          → int64[N]   particle IDs within r200c
@@ -16,10 +22,13 @@ Output HDF5 structure:
     /output_0089/r200c          → float64    virial radius in kpc
 
 Usage:
-    python scripts/calculate_binding_energies.py Halo1459_DMO \\
-        --track Halo1459_DMO_cluster_tree.hdf5 \\
-        --output Halo1459_DMO_binding_energies.hdf5 \\
-        --dmo --ahf --wall-time 120
+    # DMO, using a HOP-converted track file
+    python scripts/calculate_binding_energies.py Halo1459_DMO_Mreionx12 \\
+        --track Halo1459_DMO_Mreionx12_hop_track.hdf5 --dmo --wall-time 120
+
+    # HYDRO dark matter, using a HOP-converted track file
+    python scripts/calculate_binding_energies.py Halo1459_HYDRO_Mreionx12 \\
+        --track Halo1459_HYDRO_Mreionx12_hop_track.hdf5 --wall-time 120
 """
 
 import sys
@@ -138,14 +147,24 @@ def main():
 
     with h5py.File(track_path, 'r') as tf:
         track_snaps = set(tf.keys())
-        # Build map: output_name -> halonum (from main branch)
+        # Build map: output_name -> halonum (from main branch). Prefer the HOP
+        # halonum written by the AHF->HOP conversion; fall back to a legacy AHF
+        # 'halonum'. track_is_hop drives catalogue choice + indexing below.
         halonum_map = {}
+        track_is_hop = False
         for snap_key in track_snaps:
             grp = tf[snap_key]
-            if 'main' in grp and 'halonum' in grp['main']:
-                halonum_map[snap_key] = int(grp['main']['halonum'][()])
+            if 'main' not in grp:
+                continue
+            m = grp['main']
+            if 'hop_halonum' in m:
+                halonum_map[snap_key] = int(m['hop_halonum'][()])
+                track_is_hop = True
+            elif 'halonum' in m:
+                halonum_map[snap_key] = int(m['halonum'][()])
 
-    print(f'Track file: {track_path}  ({len(halonum_map)} snapshots with main halonum)')
+    print(f"Track file: {track_path}  ({len(halonum_map)} snapshots, "
+          f"{'HOP' if track_is_hop else 'AHF'} halonums)")
     print(f'Simulation: {pynbody_path}')
     print(f'Output:     {output_path}')
     print(f'Softening:  {softening} pc')
@@ -198,22 +217,23 @@ def main():
                 print(f'  Failed to load snapshot: {e}, skipping')
                 continue
 
-            # Load halo catalogue
+            # Load halo catalogue. A HOP track file forces the HOP catalogue
+            # (and 1-based hop_halonum indexing); otherwise honour --ahf.
             try:
-                if use_ahf:
+                if track_is_hop or not use_ahf:
+                    pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+                    halo_cat = snap.halos()
+                else:
                     pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
                     halo_cat = snap.halos(halo_numbers='v1')
-                else:
-                    pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
-                    halo_cat = pynbody.halo.hop.HOPCatalogue(snap)
             except Exception as e:
                 print(f'  Failed to load halo catalogue: {e}, skipping')
                 del snap
                 continue
 
-            # Load halo
+            # Load halo (HOP catalogue is 0-indexed; hop_halonum is 1-based)
             try:
-                h = halo_cat[halonum]
+                h = halo_cat[halonum - 1] if track_is_hop else halo_cat[halonum]
             except Exception as e:
                 print(f'  Failed to load halo {halonum}: {e}, skipping')
                 del snap

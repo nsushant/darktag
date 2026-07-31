@@ -79,12 +79,39 @@ def convert_file(track_path, pynbody_path, max_halos=None):
 
     print(f'\n=== {base} -> {os.path.basename(out_path)} ===')
 
+    # Guard against a truncated / incomplete input (e.g. track_ahf.py was killed
+    # mid-run): report clearly instead of crashing the whole batch.
+    try:
+        _probe = h5py.File(track_path, 'r')
+        _probe.close()
+    except OSError as e:
+        print(f'  SKIPPING: {base} is not a valid/complete HDF5 file '
+              f'({e}). Re-run track_ahf.py for this sim.')
+        return None
+
     with h5py.File(track_path, 'r') as fin:
         snaps = [s for s in fin.keys() if 'main' in fin[s] and 'iords' in fin[s]['main']]
         snaps.sort()
 
-        with h5py.File(out_path, 'w') as fout:
+        # Resume: skip snapshots already fully written, so a crashed/killed run
+        # (e.g. a SIGBUS on a big hydro snapshot) can be re-run to pick up where
+        # it left off instead of rebuilding every HOP catalogue from scratch.
+        done = set()
+        if os.path.isfile(out_path):
+            try:
+                with h5py.File(out_path, 'r') as fprev:
+                    for s in fprev.keys():
+                        if 'main' in fprev[s] and 'hop_halonum' in fprev[s]['main']:
+                            done.add(s)
+            except OSError:
+                done = set()  # corrupt partial output — start over
+            if done:
+                print(f'  Resuming: {len(done)} snapshots already converted, skipping those')
+
+        with h5py.File(out_path, 'a') as fout:   # append: preserve resumed work
             for snap in snaps:
+                if snap in done:
+                    continue
                 mg_in = fin[snap]['main']
                 ahf_num = int(mg_in['halonum'][()]) if 'halonum' in mg_in else -1
                 iords   = mg_in['iords'][:]
@@ -110,6 +137,8 @@ def convert_file(track_path, pynbody_path, max_halos=None):
                     del s
                     continue
 
+                if snap in fout:          # drop any partial group from a prior crash
+                    del fout[snap]
                 grp = fout.require_group(snap).require_group('main')
                 grp.create_dataset('halonum',     data=np.int64(ahf_num))
                 grp.create_dataset('hop_halonum', data=np.int64(hop_num))

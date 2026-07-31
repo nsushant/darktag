@@ -129,7 +129,11 @@ def main():
     prev_iords = None
     prev_halonum = args.halonumber
 
-    with h5py.File(output_path, 'w') as h5f:
+    # Write to a temp file and atomically rename on completion, so an
+    # interrupted / killed run never leaves a truncated file in place of a
+    # valid one (a truncated HDF5 breaks the downstream conversion step).
+    tmp_path = output_path + '.tmp'
+    with h5py.File(tmp_path, 'w') as h5f:
         for output in outputs_reversed:
             print(f'\n-- {output} --')
             simfn = pjoin(pynbody_path, output)
@@ -209,6 +213,7 @@ def main():
             prev_halonum = halonum
             del snap
 
+    os.replace(tmp_path, output_path)  # atomic: real file appears only on success
     print(f'\nDone. Wrote {output_path}')
 
 
