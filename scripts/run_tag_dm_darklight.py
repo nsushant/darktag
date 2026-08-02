@@ -44,7 +44,7 @@ def main():
     parser.add_argument('--db-name', type=str, default=None,
                         help='Tangos DB filename stem (default: first _-delimited token of sim_name, e.g. Halo1459)')
     parser.add_argument('--track-cluster-file', type=str, default=None,
-                        help='track_cluster HDF5 file; switches to AHF catalogue and uses its halonums + cluster iords')
+                        help='track_cluster HDF5 file; auto-detects hop_halonum (HOP) or halonum (AHF) and uses appropriate catalogue')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
