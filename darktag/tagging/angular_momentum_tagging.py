@@ -527,19 +527,27 @@ def angmom_tag_multi_instance(
     cluster_iords_map = None
     _tc_halonum_map   = None   # {snap: int halonum} populated from track_cluster_file
 
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py
         _tc_data = {}
         with h5py.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = {
-                        'halonum': int(f[snap]['main']['halonum'][()]),
-                        'iords':   f[snap]['main']['iords'][:],
-                    }
+                if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    num = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    num = int(grp['halonum'][()])
+                else:
+                    continue
+                _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
         _tc_halonum_map  = {s: d['halonum'] for s, d in _tc_data.items()}
         cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+        print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums + cluster iords")
     elif cluster_file is not None:
         import h5py
         with h5py.File(cluster_file, 'r') as f:
@@ -634,9 +642,13 @@ def angmom_tag_multi_instance(
             subhalo_iords = np.array([])
 
             if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-                ahf_num = _tc_halonum_map[outputs[i]]
-                h = DMOparticles.halos(halo_numbers="v1")[int(ahf_num)]
+                if _tc_is_hop:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                    h = DMOparticles.halos(halo_numbers="v1")[int(_tc_halonum_map[outputs[i]])]
             elif AHF_centers_file is None:
                 h = DMOparticles.halos()[int(halonums[i]) - 1]
             else:
@@ -810,22 +822,30 @@ def angmom_tag_multi_instance_hydro_dm(
     DMOname = HYDROsim.path
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halonumber)
 
-    # Load track_cluster HDF5 if supplied — provides AHF halonums + cluster iords
+    # Load track_cluster HDF5 if supplied — provides halonums + cluster iords
     _tc_halonum_map   = None
     cluster_iords_map = None
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py
         _tc_data = {}
         with h5py.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = {
-                        'halonum': int(f[snap]['main']['halonum'][()]),
-                        'iords':   f[snap]['main']['iords'][:],
-                    }
+                if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    num = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    num = int(grp['halonum'][()])
+                else:
+                    continue
+                _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
         _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
         cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+        print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums + cluster iords")
 
     print(f'Running DarkLight (DMO=False) {n_instances} time(s) for main halo...')
     dl_histories = [
@@ -888,7 +908,10 @@ def angmom_tag_multi_instance_hydro_dm(
             continue
 
         if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+            if _tc_is_hop:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
         else:
             pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
 
@@ -901,7 +924,11 @@ def angmom_tag_multi_instance_hydro_dm(
                 continue
 
             if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+                if _tc_is_hop:
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
             else:
                 h = HYDROparticles.halos()[int(halonums[i]) - 1]
             pynbody.analysis.halo.center(h)
@@ -1219,19 +1246,27 @@ def angmom_tag_dmo_hydro_mstars(
     # Load track_cluster HDF5 if supplied
     _tc_halonum_map   = None
     cluster_iords_map = None
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py
         _tc_data = {}
         with h5py.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = {
-                        'halonum': int(f[snap]['main']['halonum'][()]),
-                        'iords':   f[snap]['main']['iords'][:],
-                    }
+                if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    num = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    num = int(grp['halonum'][()])
+                else:
+                    continue
+                _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
         _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
         cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots, using AHF halonums + cluster iords')
+        print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums + cluster iords")
 
     if output_prefix is None:
         output_prefix = DMOname + '_tagged_dmo_hydromstars'
@@ -1272,8 +1307,13 @@ def angmom_tag_dmo_hydro_mstars(
             continue
 
         if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-            pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-            h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+            if _tc_is_hop:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+                hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+            else:
+                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
         else:
             pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
             h = DMOparticles.halos()[int(halonums[i]) - 1]

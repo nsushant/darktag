@@ -96,19 +96,25 @@ def convert_file(track_path, pynbody_path, max_halos=None):
         # Resume: skip snapshots already fully written, so a crashed/killed run
         # (e.g. a SIGBUS on a big hydro snapshot) can be re-run to pick up where
         # it left off instead of rebuilding every HOP catalogue from scratch.
+        # Only append to a *valid* existing file; a truncated/corrupt one (left
+        # by a hard crash) is overwritten rather than crashing on open.
         done = set()
+        mode = 'w'
         if os.path.isfile(out_path):
             try:
                 with h5py.File(out_path, 'r') as fprev:
                     for s in fprev.keys():
                         if 'main' in fprev[s] and 'hop_halonum' in fprev[s]['main']:
                             done.add(s)
+                mode = 'a'  # valid existing file -> resume/append
             except OSError:
-                done = set()  # corrupt partial output — start over
+                print(f'  Existing output is truncated/corrupt, starting fresh: {out_path}')
+                done = set()
+                mode = 'w'
             if done:
                 print(f'  Resuming: {len(done)} snapshots already converted, skipping those')
 
-        with h5py.File(out_path, 'a') as fout:   # append: preserve resumed work
+        with h5py.File(out_path, mode) as fout:   # 'a' to resume, 'w' if none/corrupt
             for snap in snaps:
                 if snap in done:
                     continue

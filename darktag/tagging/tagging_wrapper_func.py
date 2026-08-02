@@ -981,15 +981,23 @@ def calculate_reffs_hydro_stars(
 
     # Load track_cluster HDF5 if supplied
     _tc_halonum_map = None
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py as _h5py
         _tc_data = {}
         with _h5py.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = int(f[snap]['main']['halonum'][()])
+                if 'main' not in f[snap]:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    _tc_data[snap] = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    _tc_data[snap] = int(grp['halonum'][()])
         _tc_halonum_map = _tc_data
-        print(f'Loaded track_cluster file: {len(_tc_halonum_map)} snapshots, using AHF halonums')
+        print(f"Loaded track_cluster file: {len(_tc_halonum_map)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums")
 
     t_all, red_all, main_halo, halonums, outputs = load_indexing_data(HYDROsim, halo_number + 1)
 
@@ -1056,8 +1064,13 @@ def calculate_reffs_hydro_stars(
 
         try:
             if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-                pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
-                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+                if _tc_is_hop:
+                    pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
+                    h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
             elif use_ahf:
                 pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
                 h = HYDROparticles.halos(halo_numbers='v1')[int(halonums[i]) - 1]

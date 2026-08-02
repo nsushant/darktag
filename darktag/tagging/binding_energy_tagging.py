@@ -93,19 +93,27 @@ def be_tag_multi_instance(
     # Load track_cluster HDF5 if supplied
     _tc_halonum_map   = None
     cluster_iords_map = None
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py as _h5
         _tc_data = {}
         with _h5.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = {
-                        'halonum': int(f[snap]['main']['halonum'][()]),
-                        'iords':   f[snap]['main']['iords'][:],
-                    }
+                if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    num = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    num = int(grp['halonum'][()])
+                else:
+                    continue
+                _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
         _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
         cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots')
+        print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums")
 
     # N independent DarkLight mass histories
     print(f'Running DarkLight {n_instances} time(s) for main halo...')
@@ -185,8 +193,13 @@ def be_tag_multi_instance(
                 continue
 
             if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-                pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
-                h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+                if _tc_is_hop:
+                    pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
+                    h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
             else:
                 h = DMOparticles.halos()[int(halonums[i]) - 1]
 
@@ -318,19 +331,27 @@ def be_tag_multi_instance_hydro_dm(
 
     _tc_halonum_map   = None
     cluster_iords_map = None
+    _tc_is_hop = False
     if track_cluster_file is not None:
         import h5py as _h5
         _tc_data = {}
         with _h5.File(track_cluster_file, 'r') as f:
             for snap in f.keys():
-                if 'main' in f[snap] and 'halonum' in f[snap]['main']:
-                    _tc_data[snap] = {
-                        'halonum': int(f[snap]['main']['halonum'][()]),
-                        'iords':   f[snap]['main']['iords'][:],
-                    }
+                if 'main' not in f[snap] or 'iords' not in f[snap]['main']:
+                    continue
+                grp = f[snap]['main']
+                if 'hop_halonum' in grp:
+                    num = int(grp['hop_halonum'][()])
+                    _tc_is_hop = True
+                elif 'halonum' in grp:
+                    num = int(grp['halonum'][()])
+                else:
+                    continue
+                _tc_data[snap] = {'halonum': num, 'iords': grp['iords'][:]}
         _tc_halonum_map   = {s: d['halonum'] for s, d in _tc_data.items()}
         cluster_iords_map = {s: d['iords']   for s, d in _tc_data.items()}
-        print(f'Loaded track_cluster file: {len(_tc_data)} snapshots')
+        print(f"Loaded track_cluster file: {len(_tc_data)} snapshots, "
+              f"using {'HOP' if _tc_is_hop else 'AHF'} halonums")
 
     print(f'Running DarkLight (DMO=False) {n_instances} time(s) for main halo...')
     dl_histories = [
@@ -395,7 +416,10 @@ def be_tag_multi_instance_hydro_dm(
             continue
 
         if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-            pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
+            if _tc_is_hop:
+                pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
+            else:
+                pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
         else:
             pynbody.config['halo-class-priority'] = [pynbody.halo.hop.HOPCatalogue]
 
@@ -409,7 +433,11 @@ def be_tag_multi_instance_hydro_dm(
                 continue
 
             if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-                h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
+                if _tc_is_hop:
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(HYDROparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    h = HYDROparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
             else:
                 h = HYDROparticles.halos()[int(halonums[i]) - 1]
             pynbody.analysis.halo.center(h)
