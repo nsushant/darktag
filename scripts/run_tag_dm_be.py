@@ -34,7 +34,7 @@ def main():
                         help='Path to binding energy cache HDF5 file')
     parser.add_argument('--n-instances', type=int, required=True,
                         help='Number of independent DarkLight realisations')
-    parser.add_argument('--ftag', type=float, default=0.01,
+    parser.add_argument('--ftag', type=float, default=0.02,
                         help='Tagging fraction (default: 0.01)')
     parser.add_argument('--halonumber', type=int, default=1,
                         help='Halo number (default: 1)')

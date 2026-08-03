@@ -176,6 +176,7 @@ def main():
                 else:
                     candidates = range(1, n_halos + 1)
 
+                n_prev = len(prev_iords)
                 best_num, best_iords, best_ov = None, None, 0
                 for num in candidates:
                     try:
@@ -195,6 +196,8 @@ def main():
                     ov = int(np.isin(clean, prev_iords).sum())
                     if ov > best_ov:
                         best_ov, best_num, best_iords = ov, num, clean
+                        if best_ov > 0.5 * n_prev:
+                            break
 
                 if best_num is None or best_ov == 0:
                     print('  No overlapping halo found, stopping tracking')

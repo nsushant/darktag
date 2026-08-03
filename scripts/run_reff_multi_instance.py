@@ -44,14 +44,23 @@ def main():
                              '(HOP hop_halonum preferred, AHF halonum for legacy files)')
     parser.add_argument('--max-instances', type=int, default=None,
                         help='Only process the first N instance files (useful for testing)')
+    parser.add_argument('--hydro', action='store_true', default=False,
+                        help='Use hydro pynbody_path from config (default: DMO path)')
+    parser.add_argument('--db-name', type=str, default=None,
+                        help='Tangos DB filename stem (default: first _-delimited token of sim_name)')
     args = parser.parse_args()
 
     sim_name    = args.sim_name
     tangos_path = config.get_path('tangos_path')
-    pynbody_path = pjoin(config.get_path('pynbody_path'), sim_name)
+    db_stem     = args.db_name or sim_name.split('_')[0]
+    if args.hydro:
+        _base = config.get_with_default('paths', 'hydro_pynbody_path', None) or config.get_path('pynbody_path')
+    else:
+        _base = config.get_path('pynbody_path')
+    pynbody_path = pjoin(_base, sim_name)
 
     import tangos
-    tangos.core.init_db(pjoin(tangos_path, sim_name.split('_')[0] + '.db'))
+    tangos.core.init_db(pjoin(tangos_path, db_stem + '.db'))
     sim = tangos.get_simulation(sim_name)
 
     # Accept a single CSV file — copy it into a temp dir as instance_000.csv
