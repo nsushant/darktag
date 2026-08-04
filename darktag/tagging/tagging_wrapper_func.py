@@ -822,13 +822,12 @@ def calculate_reffs_multi_instance(
             print('r200c not available for this halo, storing NaN for kravtsov')
             kravtsov = float('nan')
 
-        # Filter snap particles once — force-load iord before subsetting
-        # (pynbody RAMSES lazy-load fails on subsnaps without this)
-        _ = DMOparticles['iord']
-        within_r200 = sqrt(DMOparticles['pos'][:, 0]**2 +
-                           DMOparticles['pos'][:, 1]**2 +
-                           DMOparticles['pos'][:, 2]**2) <= r200c_pyn
-        DMOparts_snap = DMOparticles[within_r200]
+        # Filter DM particles within r200 — use .dm for hydro sims
+        dm = DMOparticles.dm if hydro else DMOparticles
+        within_r200 = sqrt(dm['pos'][:, 0]**2 +
+                           dm['pos'][:, 1]**2 +
+                           dm['pos'][:, 2]**2) <= r200c_pyn
+        DMOparts_snap = dm[within_r200]
         DMOparts_snap = DMOparts_snap[np.logical_not(np.isin(DMOparts_snap['iord'], children_dm))]
 
         # ── Per-instance work ─────────────────────────────────────────────────
