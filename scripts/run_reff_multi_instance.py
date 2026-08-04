@@ -87,6 +87,7 @@ def main():
         max_instances=args.max_instances,
         voxel_size_kpc=args.voxel_size,
         min_cluster_size=args.min_cluster_size,
+        hydro=args.hydro,
     )
 
     out_dir = args.output_dir or args.tagged_dir.rstrip('/') + '_reffs'

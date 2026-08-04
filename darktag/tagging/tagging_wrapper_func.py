@@ -597,6 +597,7 @@ def calculate_reffs_multi_instance(
     track_cluster_file=None,
     max_instances=None,
     min_cluster_size=20,
+    hydro=False,
 ):
     '''
     Multi-instance variant of calculate_reffs_over_full_sim.
@@ -687,7 +688,10 @@ def calculate_reffs_multi_instance(
     simname = DMOsim.path
     split = simname.split('_')
     halonum = split[0][4:]
-    DMOname = 'Halo' + halonum + '_DMO' + ('' if len(split) == 2 else ('_' + '_'.join(split[2:])))
+    if hydro:
+        DMOname = simname
+    else:
+        DMOname = 'Halo' + halonum + '_DMO' + ('' if len(split) == 2 else ('_' + '_'.join(split[2:])))
 
     main_halo = DMOsim.timesteps[-1].halos[int(halo_number)]
     halonums = main_halo.calculate_for_progenitors('halo_number()')[0][::-1]
