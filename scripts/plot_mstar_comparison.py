@@ -129,8 +129,19 @@ def main():
                 pynbody.config['halo-class-priority'] = [pynbody.halo.ahf.AHFCatalogue]
                 h = snap.halos(halo_numbers='v1')[hnum]
 
-            if len(h.st) > 0:
-                mstar = float(h.st['mass'].sum().in_units('Msol'))
+            pynbody.analysis.halo.center(h)
+            try:
+                r200 = pynbody.analysis.halo.virial_radius(
+                    h.d, overden=200, r_max=None, rho_def='critical')
+            except Exception:
+                r200 = 30.0  # fallback
+
+            # grab stars from full snapshot within r200
+            st = snap.st
+            if len(st) > 0:
+                r_st = np.sqrt(st['pos'][:, 0]**2 + st['pos'][:, 1]**2 + st['pos'][:, 2]**2)
+                st_within = st[r_st <= r200]
+                mstar = float(st_within['mass'].sum().in_units('Msol')) if len(st_within) > 0 else 0.0
             else:
                 mstar = 0.0
         except Exception as e:
