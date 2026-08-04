@@ -798,12 +798,15 @@ def calculate_reffs_multi_instance(
                 h = DMOparticles.halos()[int(AHF_crossref)]
 
             if track_is_hop:
-                halo_cat = hop_cat
-            elif use_ahf or AHF_halonums is not None:
-                halo_cat = DMOparticles.halos(halo_numbers='v1')
+                # HOP halos have no 'children' property; satellite removal
+                # is handled by HDBSCAN clustering below.
+                children_dm = np.array([])
             else:
-                halo_cat = hop_cat
-            children_dm, children_st, sub_halonums = get_child_iords(h, halo_cat, DMO_state='DMO')
+                if use_ahf or AHF_halonums is not None:
+                    halo_cat = DMOparticles.halos(halo_numbers='v1')
+                else:
+                    halo_cat = hop_cat
+                children_dm, children_st, sub_halonums = get_child_iords(h, halo_cat, DMO_state='DMO')
             DMOparticles.physical_units()
             pynbody.analysis.halo.center(h)
         except Exception as e:
