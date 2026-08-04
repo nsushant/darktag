@@ -822,7 +822,9 @@ def calculate_reffs_multi_instance(
             print('r200c not available for this halo, storing NaN for kravtsov')
             kravtsov = float('nan')
 
-        # Filter snap particles once
+        # Filter snap particles once — force-load iord before subsetting
+        # (pynbody RAMSES lazy-load fails on subsnaps without this)
+        _ = DMOparticles['iord']
         within_r200 = sqrt(DMOparticles['pos'][:, 0]**2 +
                            DMOparticles['pos'][:, 1]**2 +
                            DMOparticles['pos'][:, 2]**2) <= r200c_pyn
