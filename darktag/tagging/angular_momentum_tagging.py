@@ -1207,23 +1207,23 @@ def angmom_tag_dmo_hydro_mstars(
     free_param_value=0.01,
     output_prefix=None,
     track_cluster_file=None,
+    mergers=True,
 ):
     '''
     Multi-instance angular momentum tagging on DMO DM particles using stellar mass
-    from the paired HYDRO simulation (SFR_histogram via integrate_sfr).
-
-    Identical flow to angmom_tag_multi_instance_hydro_mstars but loads DMO snapshots
-    instead of HYDRO snapshots. Stellar mass increments are sourced from HYDROsim's
-    tangos SFR_histogram, so no DarkLight stochasticity is involved.
+    from the paired HYDRO simulation (SFR_histogram via integrate_sfr) for insitu,
+    and DarkLight (DMO=True) for merging halos.
 
     Inputs:
         DMOsim           - tangos DMO simulation object (particle loading + r200c)
         HYDROsim         - tangos HYDRO simulation object (SFR_histogram only)
-        n_instances      - number of output instances (results are identical; n=1 is fine)
+        n_instances      - number of output instances (insitu is identical across instances;
+                           mergers get independent DarkLight draws per instance)
         halonumber       - halo number in DMO sim (default 1)
         free_param_value - tagging fraction (default 0.01)
         output_prefix    - directory for output CSVs
-        track_cluster_file - track_cluster HDF5; switches to AHF + filters by cluster iords
+        track_cluster_file - track_cluster HDF5; switches to AHF/HOP + filters by cluster iords
+        mergers          - whether to include accreted/merger tagging via DarkLight (default True)
 
     Returns:
         list of output CSV filenames (length n_instances)
@@ -1242,6 +1242,13 @@ def angmom_tag_dmo_hydro_mstars(
     def _mstar_at_hydro(t_target):
         idx = np.argmin(abs(t_sfr - t_target))
         return float(mstar_array[idx])
+
+    # Merger tree from DMO sim (DarkLight on merging DMO halos)
+    if mergers:
+        zmerge, qmerge, hmerge = get_mergers_of_major_progenitor(main_halo_dmo)
+        hmerge_added, z_set_vals = group_mergers(zmerge, hmerge)
+    else:
+        z_set_vals = np.array([])
 
     # Load track_cluster HDF5 if supplied
     _tc_halonum_map   = None
@@ -1288,7 +1295,14 @@ def angmom_tag_dmo_hydro_mstars(
         msp = _mstar_at_hydro(t_all[i - 1]) if i > 0 else 0.0
         mass_select = int(msn - msp)
 
-        if mass_select <= 0:
+        merger_snap = (
+            mergers
+            and (i + 1 < len(red_all))
+            and (red_all[i + 1] in z_set_vals)
+        )
+        need_snap = (mass_select > 0) or merger_snap
+
+        if not need_snap:
             print("Done with iteration", i)
             continue
 
@@ -1306,50 +1320,111 @@ def angmom_tag_dmo_hydro_mstars(
             print(f'--> failed to load snapshot: {e}, skipping')
             continue
 
-        if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
-            if _tc_is_hop:
-                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-                hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
-                h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+        # Insitu block
+        if mass_select > 0:
+            if _tc_halonum_map is not None and outputs[i] in _tc_halonum_map:
+                if _tc_is_hop:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+                    hop_cat = pynbody.halo.hop.HOPCatalogue(DMOparticles)
+                    h = hop_cat[int(_tc_halonum_map[outputs[i]]) - 1]
+                else:
+                    pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
+                    h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
             else:
-                pynbody.config["halo-class-priority"] = [pynbody.halo.ahf.AHFCatalogue]
-                h = DMOparticles.halos(halo_numbers='v1')[int(_tc_halonum_map[outputs[i]])]
-        else:
-            pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
-            h = DMOparticles.halos()[int(halonums[i]) - 1]
-        pynbody.analysis.halo.center(h)
+                pynbody.config["halo-class-priority"] = [pynbody.halo.hop.HOPCatalogue]
+                h = DMOparticles.halos()[int(halonums[i]) - 1]
+            pynbody.analysis.halo.center(h)
 
-        try:
-            r200c_pyn = pynbody.analysis.halo.virial_radius(
-                h.d, overden=200, r_max=None, rho_def='critical')
-        except Exception:
-            print('could not calculate R200c')
-            del DMOparticles
-            continue
+            try:
+                r200c_pyn = pynbody.analysis.halo.virial_radius(
+                    h.d, overden=200, r_max=None, rho_def='critical')
+            except Exception:
+                print('could not calculate R200c')
+                del DMOparticles
+                print("Done with iteration", i)
+                continue
 
-        dm_within = DMOparticles.dm[
-            sqrt(DMOparticles.dm['pos'][:, 0] ** 2
-                 + DMOparticles.dm['pos'][:, 1] ** 2
-                 + DMOparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
-        ]
+            dm_within = DMOparticles.dm[
+                sqrt(DMOparticles.dm['pos'][:, 0] ** 2
+                     + DMOparticles.dm['pos'][:, 1] ** 2
+                     + DMOparticles.dm['pos'][:, 2] ** 2) <= r200c_pyn
+            ]
 
-        if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
-            dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
+            if cluster_iords_map is not None and outputs[i] in cluster_iords_map:
+                dm_within = dm_within[np.isin(dm_within['iord'], cluster_iords_map[outputs[i]])]
 
-        parts_sorted_angmom = rank_order_particles_by_angmom(dm_within)
-        del dm_within
+            parts_sorted_angmom = rank_order_particles_by_angmom(dm_within)
+            del dm_within
 
-        if parts_sorted_angmom.shape[0] > 0:
-            arr = assign_stars_to_particles(mass_select, parts_sorted_angmom, float(free_param_value))
-            for k in range(n_instances):
-                row = pd.DataFrame({
-                    'iords': arr[0],
-                    'mstar': arr[1],
-                    't':    np.repeat(t_val, len(arr[0])),
-                    'z':    np.repeat(z_val, len(arr[0])),
-                    'type': np.repeat('insitu', len(arr[0])),
-                })
-                row.to_csv(filenames[k], mode='a', header=False)
+            if parts_sorted_angmom.shape[0] > 0:
+                arr = assign_stars_to_particles(mass_select, parts_sorted_angmom, float(free_param_value))
+                for k in range(n_instances):
+                    row = pd.DataFrame({
+                        'iords': arr[0],
+                        'mstar': arr[1],
+                        't':    np.repeat(t_val, len(arr[0])),
+                        'z':    np.repeat(z_val, len(arr[0])),
+                        'type': np.repeat('insitu', len(arr[0])),
+                    })
+                    row.to_csv(filenames[k], mode='a', header=False)
+
+        # Mergers block — DarkLight (DMO=True) on each merging DMO satellite
+        if merger_snap:
+            t_id = int(np.where(z_set_vals == red_all[i + 1])[0][0])
+
+            for hDM in hmerge_added[t_id][0]:
+                gc.collect()
+                print('merger halo:', hDM)
+
+                try:
+                    h_merge = DMOparticles.halos()[int(hDM.calculate('halo_number()')) - 1]
+                    pynbody.analysis.halo.center(h_merge.dm)
+                    r200c_pyn_acc = pynbody.analysis.halo.virial_radius(
+                        h_merge.d, overden=200, r_max=None, rho_def='critical'
+                    )
+                except Exception as ex:
+                    print('centering data unavailable, skipping', ex)
+                    continue
+
+                DMOparts_acc = DMOparticles[
+                    sqrt(DMOparticles['pos'][:, 0] ** 2
+                         + DMOparticles['pos'][:, 1] ** 2
+                         + DMOparticles['pos'][:, 2] ** 2) <= r200c_pyn_acc
+                ]
+
+                try:
+                    acc_sorted = rank_order_particles_by_angmom(DMOparts_acc)
+                except Exception:
+                    del DMOparts_acc
+                    continue
+                del DMOparts_acc
+
+                for k in range(n_instances):
+                    try:
+                        _, _, _, _, _, mstar_merging_k = DarkLight(
+                            hDM, DMO=True, n=1, mergers=True
+                        )
+                        if np.asarray(mstar_merging_k).size == 0:
+                            continue
+                    except Exception as e:
+                        print(e, '-- skipping merger instance', k)
+                        continue
+
+                    mass_merge_k = float(np.asarray(mstar_merging_k).flat[-1])
+                    if int(mass_merge_k) < 1:
+                        continue
+
+                    arr = assign_stars_to_particles(
+                        int(mass_merge_k), acc_sorted, float(free_param_value)
+                    )
+                    row = pd.DataFrame({
+                        'iords': arr[0],
+                        'mstar': arr[1],
+                        't': np.repeat(t_val, len(arr[0])),
+                        'z': np.repeat(z_val, len(arr[0])),
+                        'type': np.repeat('accreted', len(arr[0])),
+                    })
+                    row.to_csv(filenames[k], mode='a', header=False)
 
         del DMOparticles
         print("Done with iteration", i)

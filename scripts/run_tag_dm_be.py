@@ -18,6 +18,7 @@ from darktag.config import config
 from darktag.tagging.binding_energy_tagging import (
     be_tag_multi_instance,
     be_tag_multi_instance_hydro_dm,
+    be_tag_multi_instance_hydro_mstars,
 )
 
 
@@ -28,8 +29,8 @@ def main():
         description='Multi-instance DM tagging using pre-computed binding energy cache'
     )
     parser.add_argument('sim_name', help='Tangos simulation name (e.g. Halo1459_DMO)')
-    parser.add_argument('--sim-type', choices=['dmo', 'hydro'], required=True,
-                        help='Simulation type: dmo or hydro')
+    parser.add_argument('--sim-type', choices=['dmo', 'hydro', 'hydro-mstars'], required=True,
+                        help='Simulation type: dmo, hydro (DarkLight), or hydro-mstars (direct stellar mass)')
     parser.add_argument('--be-cache', required=True,
                         help='Path to binding energy cache HDF5 file')
     parser.add_argument('--n-instances', type=int, required=True,
@@ -68,9 +69,21 @@ def main():
             mergers=not args.no_mergers,
             track_cluster_file=args.track_cluster_file,
         )
-    else:
+    elif args.sim_type == 'hydro':
         output_prefix = args.output_prefix or f'{sim_name}_tagged_dm_be_hydro'
         filenames = be_tag_multi_instance_hydro_dm(
+            sim,
+            n_instances=args.n_instances,
+            be_cache=args.be_cache,
+            halonumber=args.halonumber,
+            free_param_value=args.ftag,
+            output_prefix=output_prefix,
+            mergers=not args.no_mergers,
+            track_cluster_file=args.track_cluster_file,
+        )
+    else:
+        output_prefix = args.output_prefix or f'{sim_name}_tagged_dm_be_hydro_mstars'
+        filenames = be_tag_multi_instance_hydro_mstars(
             sim,
             n_instances=args.n_instances,
             be_cache=args.be_cache,
